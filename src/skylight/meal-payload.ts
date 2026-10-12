@@ -77,16 +77,23 @@ export function buildMealCreateBody(input: MealPlanInput, categoryId: string): M
 export interface MealUpdateInput { title?: string | undefined; note?: string | undefined; description?: string | undefined; recipeId?: string | undefined }
 export interface MealUpdateBody { summary?: string; note?: string; description?: string; meal_category_id?: string; meal_recipe_id?: string }
 
-/** Only the provided fields; the category (if any) is resolved by the caller and passed in. */
-export function buildMealUpdateBody(input: MealUpdateInput, categoryId?: string): MealUpdateBody {
+/** Validates the changes up front; `withCategory` says the caller will pass a (resolved) category to the returned function. */
+export function prepareMealUpdate(input: MealUpdateInput, withCategory: boolean): (categoryId?: string) => MealUpdateBody {
   const out: MealUpdateBody = {};
   if (input.title !== undefined) out.summary = cleanText(input.title, "title", MAX_MEAL_TITLE_LENGTH);
   if (input.note !== undefined) out.note = cleanParagraph(input.note, "note", MAX_MEAL_NOTE_LENGTH);
   if (input.description !== undefined) out.description = cleanParagraph(input.description, "description", MAX_MEAL_DESCRIPTION_LENGTH);
-  if (categoryId !== undefined) out.meal_category_id = assertNumericId(categoryId, "category");
   if (input.recipeId !== undefined) out.meal_recipe_id = assertNumericId(input.recipeId, "recipeId");
-  if (Object.keys(out).length === 0) throw new ValidationError("update", "provide at least one of title, note, description, category or recipeId");
-  return out;
+  if (Object.keys(out).length === 0 && !withCategory) throw new ValidationError("update", "provide at least one of title, note, description, category or recipeId");
+  return (categoryId) => {
+    if (!withCategory || categoryId === undefined) return { ...out };
+    return { ...out, meal_category_id: assertNumericId(categoryId, "category") };
+  };
+}
+
+/** Only the provided fields; the category (if any) is resolved by the caller and passed in. */
+export function buildMealUpdateBody(input: MealUpdateInput, categoryId?: string): MealUpdateBody {
+  return prepareMealUpdate(input, categoryId !== undefined)(categoryId);
 }
 
 export interface MealCategoryUpdateInput { name?: string | undefined; color?: string | undefined; enabled?: boolean | undefined }

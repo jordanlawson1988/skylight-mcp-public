@@ -11,7 +11,7 @@ export const TOOLS_BY_TOOLSET: Record<Toolset, string[]> = {
   rewards: ["skylight_get_reward_points", "skylight_add_reward_points", "skylight_list_rewards", "skylight_create_reward", "skylight_update_reward", "skylight_redeem_reward", "skylight_unredeem_reward", "skylight_delete_reward"],
   lists: ["skylight_list_lists", "skylight_list_items", "skylight_create_list", "skylight_update_list", "skylight_delete_list", "skylight_add_list_items", "skylight_update_list_item", "skylight_move_list_item", "skylight_delete_list_items"],
   calendar: ["skylight_list_events", "skylight_create_event", "skylight_update_event", "skylight_delete_event"],
-  meals: [],
+  meals: ["skylight_list_meal_categories", "skylight_update_meal_category", "skylight_list_meals", "skylight_plan_meal", "skylight_update_meal", "skylight_delete_meal", "skylight_list_recipes", "skylight_get_recipe", "skylight_create_recipe", "skylight_update_recipe", "skylight_delete_recipe", "skylight_add_recipe_to_grocery_list"],
   photos: [],
   devices: [],
   frame: [],

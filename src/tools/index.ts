@@ -5,7 +5,9 @@ import { registerCalendarTools } from "./calendar.js";
 import type { ToolContext } from "./context.js";
 import { registerChoreTools } from "./chores.js";
 import { registerListTools } from "./lists.js";
+import { registerMealTools } from "./meals.js";
 import { registerProfileTools } from "./profiles.js";
+import { registerRecipeTools } from "./recipes.js";
 import { registerRewardTools } from "./rewards.js";
 
 type Registrar = (server: McpServer, ctx: ToolContext) => void;
@@ -19,7 +21,7 @@ const REGISTRARS: Record<Toolset, Registrar> = {
   rewards: registerRewardTools,
   lists: registerListTools,
   calendar: registerCalendarTools,
-  meals: none,
+  meals: (server, ctx) => { registerMealTools(server, ctx); registerRecipeTools(server, ctx); },
   photos: none,
   devices: none,
   frame: none,
