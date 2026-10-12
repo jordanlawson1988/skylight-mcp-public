@@ -9,6 +9,8 @@ test("defaults", () => {
   assert.equal(c.apiVersion, "2026-05-01");
   assert.equal(c.requestTimeoutMs, 30000);
   assert.equal(c.frameId, null);
+  assert.equal(c.timezone, "America/New_York");
+  assert.equal(c.timezoneExplicit, false);
   assert.match(c.credentialsDir, /Library\/Application Support\/skylight-mcp\/credentials$/);
 });
 
@@ -21,4 +23,12 @@ test("overrides and validation", () => {
   assert.throws(() => loadConfig({ SKYLIGHT_FRAME_ID: "../x" }), ValidationError);
   assert.equal(loadConfig({ SKYLIGHT_CREDENTIALS_DIR: "/tmp/x" }).credentialsDir, "/tmp/x");
   assert.throws(() => loadConfig({ SKYLIGHT_REQUEST_TIMEOUT_MS: "abc" }), ValidationError);
+});
+
+test("SKYLIGHT_TIMEZONE sets the zone, is validated, and marks itself explicit", () => {
+  const c = loadConfig({ SKYLIGHT_TIMEZONE: " Europe/London " });
+  assert.deepEqual([c.timezone, c.timezoneExplicit], ["Europe/London", true]);
+  assert.equal(loadConfig({ SKYLIGHT_TIMEZONE: "" }).timezoneExplicit, false);
+  assert.throws(() => loadConfig({ SKYLIGHT_TIMEZONE: "Mars/Olympus" }), (e: unknown) => e instanceof ValidationError && e.field === "SKYLIGHT_TIMEZONE");
+  assert.throws(() => loadConfig({ SKYLIGHT_TIMEZONE: "EST5EDT garbage" }), ValidationError);
 });
