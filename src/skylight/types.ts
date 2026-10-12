@@ -262,8 +262,10 @@ export function mapMealCategories(json: unknown): MealCategory[] {
 
 const RECIPE_HEADING = /^[A-Za-z][A-Za-z ]*:$/;
 const NUMBERING = /^\d+[.)]\s*/;
+/** A list bullet the app or a person might use: "- a", "* a" or "• a" (the bullet must be followed by whitespace). */
+const BULLET = /^[-*•]\s+/;
 
-/** Split a recipe description written in the app's convention ("Ingredients:\n- a\n\nInstructions:\n1. x\n") into its two lists. */
+/** Split a recipe description in the app's layout ("Ingredients:\n- a\n\nInstructions:\n1. x\n") into its two lists. Bullets may be "- ", "* " or "• "; steps may be numbered "1." or "1)". */
 export function parseRecipeDescription(description: string | null): { ingredients: string[] | null; instructions: string[] | null } {
   let ingredients: string[] | null = null;
   let instructions: string[] | null = null;
@@ -279,9 +281,9 @@ export function parseRecipeDescription(description: string | null): { ingredient
       continue;
     }
     if (section === "ingredients" && ingredients !== null) {
-      if (line.startsWith("- ")) { const item = line.slice(2).trim(); if (item !== "") ingredients.push(item); }
+      if (BULLET.test(line)) { const item = line.replace(BULLET, "").trim(); if (item !== "") ingredients.push(item); }
     } else if (section === "instructions" && instructions !== null) {
-      const step = line.replace(NUMBERING, "").trim();
+      const step = line.replace(NUMBERING, "").replace(BULLET, "").trim();
       if (step !== "") instructions.push(step);
     }
   }

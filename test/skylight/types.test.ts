@@ -370,3 +370,13 @@ test("mapPhotoPage threads the fallback owner id through every photo", () => {
   const json = { data: [message({ from_email: "owner@example.invalid", sender_id: 7 }), message({ from_email: "aunt@example.invalid", sender_id: 8 })], meta: { current_page: 1, num_pages: 1 } };
   assert.deepEqual(mapPhotoPage(json, 1, "7").photos.map((p) => p.from), ["you", "aunt@example.invalid"]);
 });
+
+test("parseRecipeDescription accepts -, * and • bullets for ingredients and 1. / 1) numbering (or bullets) for instructions", () => {
+  const text = "Ingredients:\n- 2 eggs\n* 1 cup flour\n• pinch of salt\n•\u00a0no-break space\n-not a bullet\n*bold* text\n**Heading-ish**\n\nInstructions:\n1. Mix\n2) Bake\n3.  Cool\n- Serve\n• Enjoy\nplain step\n";
+  assert.deepEqual(parseRecipeDescription(text), {
+    ingredients: ["2 eggs", "1 cup flour", "pinch of salt", "no-break space"],
+    instructions: ["Mix", "Bake", "Cool", "Serve", "Enjoy", "plain step"],
+  });
+  assert.deepEqual(parseRecipeDescription("Ingredients:\n*  indented star\n"), { ingredients: ["indented star"], instructions: null });
+  assert.deepEqual(parseRecipeDescription("Ingredients:\n- \n* \n• \n"), { ingredients: [], instructions: null }, "empty bullets add nothing");
+});

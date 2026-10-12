@@ -117,3 +117,10 @@ test("buildRecipeUpdateBody sends an unchanged title back exactly as stored, eve
   assert.equal(buildRecipeUpdateBody({ title: odd, categoryId: "1", description: "d" }, { description: "e" }).summary, odd);
   bad(() => buildRecipeUpdateBody({ title: odd, categoryId: "1", description: "d" }, { title: odd }), "title");
 });
+
+test("building still emits \"- \" bullets and \"1.\" numbering, whatever bullet style the stored text used", () => {
+  const existing = { title: "Tacos", categoryId: "1", description: "Ingredients:\n* tortillas\n• cheese\n\nInstructions:\n1) Assemble.\n" };
+  assert.equal(buildRecipeUpdateBody(existing, { title: "T2" }).description, existing.description, "untouched text is sent back as stored");
+  assert.equal(buildRecipeUpdateBody(existing, { ingredients: ["beef"] }).description, "Ingredients:\n- beef\n\nInstructions:\n1. Assemble.\n");
+  assert.equal(buildRecipeUpdateBody(existing, { instructions: ["Fry.", "Serve."] }).description, "Ingredients:\n- tortillas\n- cheese\n\nInstructions:\n1. Fry.\n2. Serve.\n");
+});
