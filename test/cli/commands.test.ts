@@ -64,8 +64,10 @@ test("status surfaces credential read failures instead of reporting logged out",
   assert.equal(s.loggedIn, false);
   assert.match(s.credentialError ?? "", /could not be decrypted/);
   assert.equal(s.frameId, null);
-  const clean = await status((await rt([])).runtime);
+  const second = await rt([]);
+  const clean = await status(second.runtime);
   assert.equal(clean.credentialError, null);
+  await second.cleanup();
   await cleanup();
 });
 
