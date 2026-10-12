@@ -23,10 +23,29 @@ test("mapChores flattens attributes and category relationships", () => {
     relationships: { categories: { data: [{ id: "12" }, { id: "13" }] } },
   }] });
   assert.equal(out.length, 2);
-  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"] });
+  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"], seriesId: "900", instanceDate: "2026-10-13" });
   assert.deepEqual(out[1]!.profileIds, ["12", "13"]);
   assert.equal(out[1]!.recurrenceRule, "RRULE:FREQ=WEEKLY");
   assert.equal(out[1]!.routine, false);
+});
+
+test("mapChores derives seriesId and instanceDate from composite ids and the series attribute", () => {
+  const out = mapChores({ data: [
+    { id: "111881467", attributes: { summary: "A", series: 111881467, start: "2026-10-12" } },
+    { id: "111881467-2026-10-13", attributes: { summary: "A", series: "111881467", start: "2026-10-12" } },
+    { id: "777-2026-10-14", attributes: { summary: "B" } },
+    { id: "888", attributes: { summary: "C" } },
+    { id: "999-2026-10-15", attributes: { summary: "D", series: "not valid!" } },
+    { id: "555-2026-02-30", attributes: { summary: "E" } },
+  ] });
+  assert.deepEqual(out.map((c) => [c.id, c.seriesId, c.instanceDate]), [
+    ["111881467", "111881467", "2026-10-12"],
+    ["111881467-2026-10-13", "111881467", "2026-10-13"],
+    ["777-2026-10-14", "777", "2026-10-14"],
+    ["888", "888", null],
+    ["999-2026-10-15", "999", "2026-10-15"],
+    ["555-2026-02-30", "555-2026-02-30", null],
+  ]);
 });
 
 test("mappers tolerate missing data and skip malformed items", () => {

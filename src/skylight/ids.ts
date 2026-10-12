@@ -11,6 +11,18 @@ export function assertId(value: string | number, field: string): string {
   return s;
 }
 
+export const COMPOSITE_CHORE_ID = /^(\d+)-(\d{4}-\d{2}-\d{2})$/;
+
+export interface ChoreRef { seriesId: string; instanceDate: string | null }
+
+/** Accepts "123" or "123-2026-10-13". Throws ValidationError(field) otherwise. */
+export function parseChoreId(value: unknown, field: string): ChoreRef {
+  const id = assertId(value as string | number, field);
+  const m = COMPOSITE_CHORE_ID.exec(id);
+  if (!m) return { seriesId: id, instanceDate: null };
+  return { seriesId: m[1]!, instanceDate: assertDate(m[2]!, field) };
+}
+
 export function localDateString(d: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

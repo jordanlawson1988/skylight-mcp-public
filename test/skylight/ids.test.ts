@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertId, assertDate, assertTime, cleanText, assertEmoji, assertPoints, localDateString } from "../../src/skylight/ids.js";
+import { assertId, assertDate, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, assertEmoji, assertPoints, localDateString } from "../../src/skylight/ids.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 test("assertId accepts simple ids and numbers", () => {
@@ -51,4 +51,19 @@ test("assertPoints bounds integers", () => {
 test("localDateString uses local calendar fields, zero-padded", () => {
   assert.equal(localDateString(new Date(2026, 0, 31, 23, 30)), "2026-01-31");
   assert.equal(localDateString(new Date(2026, 11, 1, 0, 5)), "2026-12-01");
+});
+
+test("parseChoreId splits composite ids and passes plain ids through", () => {
+  assert.deepEqual(parseChoreId("111881467", "choreId"), { seriesId: "111881467", instanceDate: null });
+  assert.deepEqual(parseChoreId(111881467, "choreId"), { seriesId: "111881467", instanceDate: null });
+  assert.deepEqual(parseChoreId("111881467-2026-10-13", "choreId"), { seriesId: "111881467", instanceDate: "2026-10-13" });
+  assert.deepEqual(parseChoreId("abc_1", "choreId"), { seriesId: "abc_1", instanceDate: null });
+  assert.ok(COMPOSITE_CHORE_ID.test("1-2026-10-13"));
+});
+
+test("parseChoreId rejects invalid ids and impossible composite dates", () => {
+  for (const bad of ["", "../x", "a/b", "5 6", "x".repeat(65)]) {
+    assert.throws(() => parseChoreId(bad, "choreId"), (e: unknown) => e instanceof ValidationError && (e as ValidationError).field === "choreId");
+  }
+  assert.throws(() => parseChoreId("5-2026-02-30", "choreId"), (e: unknown) => e instanceof ValidationError && (e as ValidationError).field === "choreId");
 });

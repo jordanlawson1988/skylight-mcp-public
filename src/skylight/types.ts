@@ -1,9 +1,13 @@
-import { ID_PATTERN } from "./ids.js";
+import { ID_PATTERN, parseChoreId, type ChoreRef } from "./ids.js";
 
 export interface Profile { id: string; name: string; color: string | null; isAdult: boolean | null }
 export interface Chore {
   id: string; summary: string; start: string | null; startTime: string | null; status: string | null;
   routine: boolean; recurring: boolean; recurrenceRule: string | null; rewardPoints: number | null; emoji: string | null; profileIds: string[];
+  /** Numeric series id (attributes.series, else the numeric prefix of a composite id). Use it in request paths. */
+  seriesId: string;
+  /** Occurrence date: the date in a composite id, else attributes.start, else null. */
+  instanceDate: string | null;
 }
 export interface RewardPoints { profileId: string; points: number }
 export interface Reward { id: string; title: string; cost: number | null; emoji: string | null; redeemedAt: string | null; profileIds: string[] }
@@ -57,6 +61,8 @@ export function mapChore(resource: unknown): Chore | null {
   if (!id || summary === null) return null;
   const rs = a.recurrence_set;
   const rule = Array.isArray(rs) ? str(rs[0]) : str(rs);
+  let ref: ChoreRef;
+  try { ref = parseChoreId(id, "id"); } catch { ref = { seriesId: id, instanceDate: null }; }
   return {
     id, summary,
     start: str(a.start), startTime: str(a.start_time), status: str(a.status),
@@ -65,6 +71,8 @@ export function mapChore(resource: unknown): Chore | null {
     recurrenceRule: rule,
     rewardPoints: num(a.reward_points), emoji: str(a.emoji_icon),
     profileIds: relationshipIds(r),
+    seriesId: idOf(a.series) ?? ref.seriesId,
+    instanceDate: ref.instanceDate ?? str(a.start),
   };
 }
 
