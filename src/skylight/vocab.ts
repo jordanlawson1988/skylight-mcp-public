@@ -1,4 +1,5 @@
-// Single source of truth for server-defined vocabularies. Task 9 (live spike) verifies these.
+// Single source of truth for server-defined vocabularies.
+// Verified 2026-10-12 against the Skylight web app bundle (see docs/api.md).
 export const CHORE_STATUS = { done: "complete", notDone: "pending" } as const;
-// Empty until verified against the web app. While empty, tools do not expose applyTo.
-export const APPLY_TO_VALUES: readonly string[] = [];
+// apply_to for recurring chore update/delete: "one" = this instance, "future" = this and following, "all" = whole series.
+export const APPLY_TO_VALUES: readonly string[] = ["one", "future", "all"];
