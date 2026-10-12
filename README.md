@@ -72,12 +72,12 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | --- | --- |
 | `skylight_auth_status` | Reports login state, API host, frame and token expiry. Never returns secrets. |
 | `skylight_list_profiles` | Lists family profiles and their ids. Chores and points are assigned by profile id. |
-| `skylight_list_chores` | Lists chores and routine steps in a date range (default today through 14 days ahead). |
+| `skylight_list_chores` | Lists chores and routine steps in a date range (default today through 14 days ahead), sorted by `instanceDate` then summary. Overdue occurrences are only included with `includeLate: true` (default false; can be large). Recurring occurrences carry a `seriesId` and an `instanceDate`; ids of later occurrences look like `123-2026-10-13`. |
 | `skylight_create_chore` | Creates one chore or routine step for one or more profiles. Returns `{ created, ids }`, because Skylight makes one chore per assigned profile. |
 | `skylight_bulk_create_chores` | Creates up to 50 chores in one call. Validates all items first and supports `dryRun: true`. |
-| `skylight_update_chore` | Changes fields on an existing chore. Only the fields you pass change. `applyTo` currently accepts only `"all"`; per-occurrence scopes are not available yet. |
-| `skylight_delete_chore` | Deletes a chore. Returns a preview and changes nothing unless `confirm: true` is set. |
-| `skylight_complete_chore` | Marks one occurrence done for a profile on a date, or reverts it with `done: false`. |
+| `skylight_update_chore` | Changes fields on an existing chore. Only the fields you pass change. Accepts plain or composite ids (the series id is used). `applyTo` accepts only `"all"`; per-occurrence scopes are not available for update. |
+| `skylight_delete_chore` | Deletes a chore. Returns a preview and changes nothing unless `confirm: true` is set. One-time chore: omit `applyTo`. Recurring chore: `applyTo: "all"` deletes the whole series, `"future"` deletes the given occurrence and all later ones, `"one"` deletes only that occurrence. `"one"` and `"future"` need the occurrence date: pass a composite id such as `123-2026-10-13`, or the plain id plus `instanceDate`. |
+| `skylight_complete_chore` | Marks a chore done, or reverts it with `done: false`. Recurring chores need the occurrence date (a composite id like `123-2026-10-13`, or `instanceDate`); one-time chores must omit it. `profileId` is optional and only for up-for-grabs chores. |
 | `skylight_get_reward_points` | Shows the current point balance per profile. |
 | `skylight_add_reward_points` | Adds or subtracts points for one or more profiles. Negative values subtract. |
 | `skylight_list_rewards` | Lists the rewards the family has set up, with point cost and redemption state. |
@@ -97,7 +97,7 @@ npm run check        # typecheck, tests and build
 npm run live:smoke   # opt-in checks against the real API
 ```
 
-`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete and delete one test chore. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
+`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete one one-time chore and one daily recurring chore (including deleting a single occurrence and the whole series). It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
 
 ## Credits
 
