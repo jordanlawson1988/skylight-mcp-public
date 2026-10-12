@@ -623,3 +623,84 @@ test("only the documented update fields accept null", async () => {
   assert.ok(!t.calls.some((c) => c.method === "PUT"));
   await t.close();
 });
+
+const CATS: MockRoute = { method: "GET", path: "/api/frames/77/categories", json: { data: [
+  { id: "12", attributes: { label: "Ellie", linked_to_profile: true } },
+  { id: "13", attributes: { label: "Sam", linked_to_profile: true } },
+  { id: "14", attributes: { label: "Birthdays", linked_to_profile: false } },
+] } };
+const CREATE: MockRoute = { method: "POST", path: "/api/frames/77/chores/create_multiple", json: { data: [chore("5", "x")] } };
+const categoryGets = (t: { calls: Array<{ method: string; url: URL }> }) => t.calls.filter((c) => c.method === "GET" && c.url.pathname === "/api/frames/77/categories").length;
+
+test("create chore refuses a label or unknown profile before any POST", async () => {
+  const t = await connectTestClient([FRAMES, CATS, CREATE]);
+  const label = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13", profileIds: ["12", "14"] });
+  assert.equal(label.isError, true);
+  assert.match(label.text, /profileIds: 14 \(Birthdays\) is a label, not a person profile/);
+  const unknown = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13", profileIds: ["999"] });
+  assert.equal(unknown.isError, true);
+  assert.match(unknown.text, /profileIds: 999 is not a profile on this frame/);
+  assert.ok(!t.calls.some((c) => c.method === "POST"));
+  const ok = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13", profileIds: ["12"] });
+  assert.equal(ok.isError, false);
+  await t.close();
+});
+
+test("a failed categories lookup does not block the write", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/categories", status: 500, text: "boom" }, CREATE]);
+  const r = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13", profileIds: ["14"] });
+  assert.equal(r.isError, false);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 1);
+  await t.close();
+});
+
+test("up-for-grabs create without profileIds does no categories lookup", async () => {
+  const t = await connectTestClient([FRAMES, CATS, CREATE]);
+  const r = await t.callTool("skylight_create_chore", { summary: "x", upForGrabs: true });
+  assert.equal(r.isError, false);
+  assert.equal(categoryGets(t), 0);
+  await t.close();
+});
+
+test("bulk create does one lookup for the batch and reports label items without posting them", async () => {
+  const t = await connectTestClient([FRAMES, CATS, CREATE]);
+  const r = await t.callTool("skylight_bulk_create_chores", { chores: [
+    { summary: "A", start: "2026-10-13", profileIds: ["12"] },
+    { summary: "B", start: "2026-10-13", profileIds: ["12", "14"] },
+    { summary: "C", start: "2026-10-13", profileIds: ["13"] },
+  ] });
+  const d = r.data as { created: number; failed: number; results: Array<{ ok: boolean; error?: string }> };
+  assert.equal(categoryGets(t), 1);
+  assert.equal(d.created, 2);
+  assert.equal(d.failed, 1);
+  assert.match(d.results[1]!.error!, /14 \(Birthdays\) is a label/);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 2);
+  const idxOfFirstPost = t.calls.findIndex((c) => c.method === "POST");
+  assert.ok(t.calls.findIndex((c) => c.url.pathname === "/api/frames/77/categories") < idxOfFirstPost);
+  await t.close();
+});
+
+test("bulk create dry run also flags labels", async () => {
+  const t = await connectTestClient([FRAMES, CATS]);
+  const r = await t.callTool("skylight_bulk_create_chores", { dryRun: true, chores: [{ summary: "B", start: "2026-10-13", profileIds: ["14"] }] });
+  const d = r.data as { valid: number; invalid: number; results: Array<{ ok: boolean; error?: string }> };
+  assert.equal(d.invalid, 1);
+  assert.equal(d.results[0]!.ok, false);
+  assert.ok(!t.calls.some((c) => c.method === "POST"));
+  await t.close();
+});
+
+test("update chore guards profileIds when given, and skips the lookup otherwise", async () => {
+  const t = await connectTestClient([FRAMES, CATS, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "x") } }]);
+  const bad = await t.callTool("skylight_update_chore", { choreId: "5", profileIds: ["14"] });
+  assert.equal(bad.isError, true);
+  assert.match(bad.text, /is a label, not a person profile/);
+  assert.ok(!t.calls.some((c) => c.method === "PUT"));
+  const ok = await t.callTool("skylight_update_chore", { choreId: "5", profileIds: ["13"] });
+  assert.equal(ok.isError, false);
+  assert.deepEqual(t.calls.at(-1)!.body, { category_ids: ["13"] });
+  const before = categoryGets(t);
+  await t.callTool("skylight_update_chore", { choreId: "5", summary: "y" });
+  assert.equal(categoryGets(t), before);
+  await t.close();
+});

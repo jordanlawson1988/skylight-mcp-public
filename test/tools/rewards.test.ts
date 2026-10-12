@@ -102,3 +102,27 @@ test("list rewards maps", async () => {
   assert.deepEqual(d.map((x) => [x.title, x.cost, x.respawnOnRedemption]), [["Reward 1", 400, true], ["Reward 2", 250, true]]);
   await t.close();
 });
+
+test("add reward points refuses a label (Birthdays) and sends no POST", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: "/api/frames/77/reward_points", json: { data: [] } }]);
+  const r = await t.callTool("skylight_add_reward_points", { profileIds: ["12", "14"], points: 5 });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /profileIds: 14 \(Birthdays\) is a label, not a person profile/);
+  const unknown = await t.callTool("skylight_add_reward_points", { profileIds: ["999"], points: 5 });
+  assert.match(unknown.text, /999 is not a profile on this frame/);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 0);
+  await t.close();
+});
+
+test("add reward points still posts when the categories lookup fails", async () => {
+  const t = await connectTestClient([
+    FRAMES,
+    { method: "GET", path: "/api/frames/77/categories", status: 500, text: "boom" },
+    { method: "POST", path: "/api/frames/77/reward_points", json: { data: [] } },
+    { method: "GET", path: "/api/frames/77/reward_points", json: [pts(12, 5)] },
+  ]);
+  const r = await t.callTool("skylight_add_reward_points", { profileIds: ["12"], points: 5 });
+  assert.equal(r.isError, false);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 1);
+  await t.close();
+});

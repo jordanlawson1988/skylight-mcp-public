@@ -1,10 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { ValidationError } from "../skylight/errors.js";
+import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertId, localDateString } from "../skylight/ids.js";
 import { buildProfileCreateBody, buildProfileUpdateBody, type ProfileInput } from "../skylight/profile-payload.js";
 import { mapChores, mapProfile, mapProfiles, type Profile } from "../skylight/types.js";
-import { DEFAULT_PROFILE_KIND, PROFILE_KINDS, isPersonKind } from "../skylight/vocab.js";
+import { DEFAULT_PROFILE_KIND, PROFILE_KINDS, isLabelKind, isPersonKind } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { ANNOTATIONS, run } from "./result.js";
 
@@ -35,6 +35,35 @@ async function countUpcomingChores(ctx: ToolContext, frameId: string, profileId:
   } catch {
     return null;
   }
+}
+
+/**
+ * Problem text per id that is not a person profile on this frame (a label, or unknown), or null when the categories
+ * lookup itself failed (the guard is a convenience and must never block a write).
+ */
+export async function personProfileProblems(ctx: ToolContext, frameId: string, ids: readonly string[]): Promise<Map<string, string> | null> {
+  let profiles: Profile[];
+  try {
+    profiles = mapProfiles(await ctx.client.request({ method: "GET", path: categoriesPath(frameId) }));
+  } catch (e) {
+    if (e instanceof SkylightApiError) return null;
+    throw e;
+  }
+  const byId = new Map(profiles.map((p) => [p.id, p]));
+  const problems = new Map<string, string>();
+  for (const id of ids) {
+    const p = byId.get(id);
+    if (!p) problems.set(id, `${id} is not a profile on this frame`);
+    else if (isLabelKind(p.kind)) problems.set(id, `${id} (${p.name}) is a label, not a person profile`);
+  }
+  return problems;
+}
+
+/** Throws ValidationError(field) when an id is a label (Birthdays etc.) or unknown on this frame. A failed lookup skips the check. */
+export async function assertPersonProfiles(ctx: ToolContext, frameId: string, ids: string[], field: string): Promise<void> {
+  const problems = await personProfileProblems(ctx, frameId, ids);
+  const first = problems === null ? undefined : ids.map((id) => problems.get(id)).find((m) => m !== undefined);
+  if (first !== undefined) throw new ValidationError(field, first);
 }
 
 function findProfile(profiles: Profile[], id: string, field: string): Profile {

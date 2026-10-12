@@ -29,3 +29,5 @@ export const slotFromStartTime = (startTime: string | null): RoutineSlot | null 
   const m = startTime === null ? null : /^(\d{2}):00$/.exec(startTime);
   return m ? slotFromHour(Number(m[1])) : null;
 };
+/** True for a calendar label such as Birthdays; false for a person or an unknown kind. */
+export const isLabelKind = (kind: ProfileKind | null): boolean => kind !== null && !linkedFromKind(kind);

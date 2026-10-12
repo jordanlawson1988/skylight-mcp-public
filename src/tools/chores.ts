@@ -7,6 +7,7 @@ import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
 import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, ROUTINE_SLOT_NAMES } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
+import { personProfileProblems, assertPersonProfiles } from "./profiles.js";
 import { ANNOTATIONS, run } from "./result.js";
 
 export const MAX_BULK = 50;
@@ -22,7 +23,7 @@ export const recurrenceShape = z.object({
 export const choreInputShape = {
   summary: z.string().describe("Chore title, e.g. \"Feed the dog\"."),
   start: z.string().optional().describe("First date YYYY-MM-DD. Required unless upForGrabs is true (up-for-grabs chores may have no date)."),
-  profileIds: z.array(z.string()).min(1).max(20).optional().describe("Profile ids from skylight_list_profiles. One chore is created per profile. Required unless upForGrabs is true (then omit it for an unassigned chore anyone can claim)."),
+  profileIds: z.array(z.string()).min(1).max(20).optional().describe("Profile ids from skylight_list_profiles (people only; labels such as Birthdays are rejected). One chore is created per profile. Required unless upForGrabs is true (then omit it for an unassigned chore anyone can claim)."),
   startTime: z.string().optional().describe("HH:mm 24-hour. Not allowed on routine steps."),
   recurrence: recurrenceShape.optional().describe("Omit for a one-off chore."),
   routine: z.boolean().optional().describe("true makes this a routine step instead of a chore (needs timeOfDay, no startTime; recurrence defaults to daily). Default false."),
@@ -161,7 +162,9 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       annotations: ANNOTATIONS.create,
     },
     (args) => run(async () => {
-      const created = await createOne(ctx, await ctx.frames.resolve(), args as ChoreInput);
+      const frameId = await ctx.frames.resolve();
+      if (args.profileIds !== undefined) await assertPersonProfiles(ctx, frameId, args.profileIds.map((p) => assertId(p, "profileIds")), "profileIds");
+      const created = await createOne(ctx, frameId, args as ChoreInput);
       return { created, ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) };
     })
   );
@@ -179,15 +182,23 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     },
     (args) => run(async () => {
       const results: Array<{ index: number; summary: string; ok: boolean; ids?: string[]; warning?: string; error?: string; payload?: unknown }> = [];
-      const payloads = args.chores.map((c, index) => {
+      const frameId = await ctx.frames.resolve();
+      const built = args.chores.map((c, index) => {
         try { return { index, payload: buildChoreCreateBody(c as ChoreInput) }; }
         catch (e) { return { index, error: e instanceof Error ? e.message : String(e) }; }
+      });
+      // One categories lookup for the whole batch, before any POST: labels and unknown ids fail their item only.
+      const wanted = [...new Set(built.flatMap((p) => ("payload" in p ? p.payload.category_ids : [])))];
+      const problems = wanted.length === 0 ? null : await personProfileProblems(ctx, frameId, wanted);
+      const payloads = built.map((p) => {
+        if (!("payload" in p) || problems === null) return p;
+        const bad = p.payload.category_ids.map((id) => problems.get(id)).find((m) => m !== undefined);
+        return bad === undefined ? p : { index: p.index, error: `profileIds: ${bad}` };
       });
       if (args.dryRun) {
         return { dryRun: true, valid: payloads.filter((p) => "payload" in p).length, invalid: payloads.filter((p) => "error" in p).length,
           results: payloads.map((p) => ({ index: p.index, summary: args.chores[p.index]!.summary, ok: !("error" in p), ...("payload" in p ? { payload: p.payload } : { error: p.error }) })) };
       }
-      const frameId = await ctx.frames.resolve();
       let stop: string | null = null;
       for (const p of payloads) {
         const summary = args.chores[p.index]!.summary;
@@ -234,6 +245,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const body: Record<string, unknown> = buildChoreUpdateBody(rest as ChoreUpdateInput);
       if (applyTo !== undefined) body.apply_to = applyTo;
       const frameId = await ctx.frames.resolve();
+      if (rest.profileIds !== undefined) await assertPersonProfiles(ctx, frameId, (rest.profileIds as string[]).map((p) => assertId(p, "profileIds")), "profileIds");
       const json = await ctx.client.request<unknown>({ method: "PUT", path: `${choresPath(frameId)}/${id}`, body });
       return mapChore((json as { data?: unknown })?.data) ?? { id, updated: true };
     })

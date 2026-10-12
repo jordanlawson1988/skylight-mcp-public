@@ -5,7 +5,7 @@ import { assertId, assertPoints } from "../skylight/ids.js";
 import { mapRewardPoints, mapRewards, type Profile } from "../skylight/types.js";
 import type { ProfileKind } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
-import { listProfiles } from "./profiles.js";
+import { assertPersonProfiles, listProfiles } from "./profiles.js";
 import { ANNOTATIONS, run } from "./result.js";
 
 interface Balance { profileId: string; name: string | null; kind: ProfileKind | null; points: number; lifetimePoints: number | null }
@@ -38,7 +38,7 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
     "skylight_add_reward_points",
     {
       title: "Add or subtract reward points",
-      description: "Adjust reward points for one or more profiles. Negative points subtract. Not idempotent: repeating the call adds the points again. Confirm the amount with the user before subtracting. Returns { added: { profileIds, points }, balances } where balances are re-read after the change as [{ profileId, name, kind, points, lifetimePoints }]. If the re-read fails, balances is null and a warning says the points were still added: do not retry the add, call skylight_get_reward_points instead. Profile ids come from skylight_list_profiles.",
+      description: "Adjust reward points for one or more profiles. Negative points subtract. Not idempotent: repeating the call adds the points again. Confirm the amount with the user before subtracting. Returns { added: { profileIds, points }, balances } where balances are re-read after the change as [{ profileId, name, kind, points, lifetimePoints }]. If the re-read fails, balances is null and a warning says the points were still added: do not retry the add, call skylight_get_reward_points instead. Profile ids come from skylight_list_profiles; labels such as Birthdays are rejected.",
       inputSchema: {
         profileIds: z.array(z.string()).min(1).max(20).describe("Profile ids from skylight_list_profiles."),
         points: z.number().int().describe("Points to add (negative subtracts). Range -10000 to 10000."),
@@ -50,6 +50,7 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
       if (new Set(ids).size !== ids.length) throw new ValidationError("profileIds", "must not repeat");
       const points = assertPoints(args.points, "points");
       const frameId = await ctx.frames.resolve();
+      await assertPersonProfiles(ctx, frameId, ids, "profileIds");
       await ctx.client.request({ method: "POST", path: `/api/frames/${frameId}/reward_points`, body: { category_ids: ids, points } });
       const added = { profileIds: ids, points };
       try {
