@@ -169,18 +169,32 @@ test("a transient refresh failure names the remote login command and does not ma
 });
 
 test("a credential set while a refresh is in flight is not overwritten by that refresh", async () => {
+  // (Also covered for every interleaving by capturing the generation before the refresh's first await.)
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
   const { fetch: inner } = createMockFetch([tokenRoute({ access_token: "AT-OLDGRANT", refresh_token: "RT-OLDGRANT", expires_in: 3600 })]);
-  const fetch = (async (input: string | URL, init?: RequestInit) => { await gate; return inner(input, init); }) as typeof globalThis.fetch;
+  let entered!: () => void;
+  const inFetch = new Promise<void>((r) => { entered = r; });
+  const fetch = (async (input: string | URL, init?: RequestInit) => { entered(); await gate; return inner(input, init); }) as typeof globalThis.fetch;
   const core = new AccountCore({ storage: createMemoryKv(), keyB64: KEY, fetch, config: parseConfig({}), now: () => T0 });
   await core.setCredential(cred({ expiresAt: T0 - 1 }));
   const pending = core.getAccessToken();
-  await new Promise((r) => setTimeout(r, 10));
+  await inFetch;
   await core.setCredential(cred({ accessToken: "AT-NEWGRANT", refreshToken: "RT-NEWGRANT" }));
   release();
   assert.equal(await pending, "AT-NEWGRANT");
   assert.equal(await core.getAccessToken(), "AT-NEWGRANT");
+});
+
+test("a credential set in the same tick as a refresh starts still wins", async () => {
+  for (let i = 0; i < 20; i++) {
+    const { core } = setup([tokenRoute({ access_token: "AT-OLDGRANT", refresh_token: "RT-OLDGRANT", expires_in: 3600 })]);
+    await core.setCredential(cred({ expiresAt: T0 - 1 }));
+    const pending = core.getAccessToken();
+    await core.setCredential(cred({ accessToken: "AT-NEWGRANT", refreshToken: "RT-NEWGRANT" }));
+    assert.equal(await pending, "AT-NEWGRANT");
+    assert.equal(await core.getAccessToken(), "AT-NEWGRANT");
+  }
 });
 
 test("setCredential refuses a malformed credential", async () => {

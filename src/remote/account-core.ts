@@ -150,9 +150,10 @@ export class AccountCore {
   private refreshIfStillCurrent(seen: OAuthCredential, stillStale: (c: OAuthCredential) => boolean): Promise<string> {
     if (this.inflight) return this.inflight;
     const run = (async () => {
+      // Taken before any await: a setCredential or clearCredential from here on wins over this refresh.
+      const generation = this.generation;
       const current = await this.usableCredential();
       if (current.refreshToken !== seen.refreshToken || !stillStale(current)) return current.accessToken;
-      const generation = this.generation;
       let fresh: OAuthCredential;
       try {
         fresh = await refreshCredential({
