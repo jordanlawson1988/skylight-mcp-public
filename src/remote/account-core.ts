@@ -293,3 +293,62 @@ function sanitizeAudit(r: AuditRecord): AuditRecord {
   if (typeof r.error === "string" && r.error !== "") out.error = auditError(r.error);
   return out;
 }
+
+// ---- the Durable Object's RPC surface ----
+
+/** Token answers cross the RPC boundary as values: an AuthError becomes { ok: false } with its message. */
+export type TokenResult = { ok: true; token: string } | { ok: false; error: string };
+
+/** What the Worker calls on the SkylightAccount Durable Object (account-do.ts implements it over AccountCore). */
+export interface AccountRpc {
+  getAccessToken(): Promise<TokenResult>;
+  refreshAfterRejection(rejected: string): Promise<TokenResult>;
+  setCredential(credential: OAuthCredential): Promise<void>;
+  clearCredential(): Promise<boolean>;
+  status(): Promise<AccountStatus>;
+  appendAudit(record: AuditRecord): Promise<void>;
+  recentAudit(limit: number): Promise<AuditRecord[]>;
+  allow(who: string, bucket: RateBucket): Promise<boolean>;
+}
+
+export async function tokenResult(fn: () => Promise<string>): Promise<TokenResult> {
+  try {
+    return { ok: true, token: await fn() };
+  } catch (e) {
+    if (e instanceof AuthError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+/** Turns a TokenResult back into a token or the AuthError it carried (the Worker side of the boundary). */
+export function unwrapToken(result: TokenResult): string {
+  if (result.ok) return result.token;
+  throw new AuthError(result.error);
+}
+
+/** Adapts Durable Object storage (get returns undefined when absent) to KvLike. */
+export function kvFromStorage(storage: {
+  get(key: string): Promise<unknown>;
+  put(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<boolean>;
+}): KvLike {
+  return {
+    async get(key) { const v = await storage.get(key); return typeof v === "string" ? v : null; },
+    put: (key, value) => storage.put(key, value),
+    async delete(key) { await storage.delete(key); },
+  };
+}
+
+/** AccountRpc over one AccountCore: what the Durable Object exposes, and what tests use in its place. */
+export function accountRpc(core: AccountCore): AccountRpc {
+  return {
+    getAccessToken: () => tokenResult(() => core.getAccessToken()),
+    refreshAfterRejection: (rejected) => tokenResult(() => core.refreshAfterRejection(rejected)),
+    setCredential: (c) => core.setCredential(c),
+    clearCredential: () => core.clearCredential(),
+    status: () => core.status(),
+    appendAudit: (r) => core.appendAudit(r),
+    recentAudit: (limit) => core.recentAudit(limit),
+    allow: (who, bucket) => core.allow(who, bucket),
+  };
+}
