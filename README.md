@@ -80,7 +80,7 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | `skylight_create_chore` | Creates one chore or routine step for one or more profiles. Returns `{ created, ids }`, because Skylight makes one chore per assigned profile. |
 | `skylight_bulk_create_chores` | Creates up to 50 chores in one call. Validates all items first and supports `dryRun: true`. |
 | `skylight_update_chore` | Changes fields on an existing chore. Only the fields you pass change. Accepts plain or composite ids (the series id is used). `applyTo` accepts only `"all"`; per-occurrence scopes are not available for update. |
-| `skylight_delete_chore` | Deletes a chore. Returns a preview and changes nothing unless `confirm: true` is set. One-time chore: omit `applyTo`. Recurring chore: `applyTo: "all"` deletes the whole series, `"future"` deletes the given occurrence and all later ones, `"one"` deletes only that occurrence. `"one"` and `"future"` need the occurrence date: pass a composite id such as `123-2026-10-13`, or the plain id plus `instanceDate`. |
+| `skylight_delete_chore` | Deletes a chore. Returns a preview and changes nothing unless `confirm: true` is set. One-time chore: omit `applyTo`. Recurring chore: `applyTo: "all"` deletes the whole series, `"future"` deletes the given occurrence and all later ones, `"one"` deletes only that occurrence. Routine steps can only be deleted as a whole series (`"all"`); `"one"` and `"future"` are for regular recurring chores. `"one"` and `"future"` need the occurrence date: pass a composite id such as `123-2026-10-13`, or the plain id plus `instanceDate`. |
 | `skylight_complete_chore` | Marks a chore done, or reverts it with `done: false`. Recurring chores need the occurrence date (a composite id like `123-2026-10-13`, or `instanceDate`); one-time chores must omit it. `profileId` is optional and only for up-for-grabs chores. |
 | `skylight_get_reward_points` | Shows the current point balance per profile. |
 | `skylight_add_reward_points` | Adds or subtracts points for one or more profiles. Negative values subtract. |
@@ -111,7 +111,7 @@ npm run check        # typecheck, tests and build
 npm run live:smoke   # opt-in checks against the real API
 ```
 
-`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete a one-time chore and a daily recurring chore (including deleting a single occurrence and the whole series), the weekly, monthly, interval and until recurrences, a morning routine step, an up-for-grabs chore, and a field-clearing update. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
+`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete a one-time chore and a daily recurring chore (including deleting a single occurrence and the whole series), the weekly, monthly, interval and until recurrences, a morning routine step (complete, revert, delete as a whole), an up-for-grabs chore, and a field-clearing update. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
 
 ## Credits
 

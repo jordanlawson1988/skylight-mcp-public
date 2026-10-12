@@ -462,16 +462,10 @@ test("complete chore rejects an instanceTime that disagrees with the id, before 
   await t.close();
 });
 
-test("delete one/future on a time-suffixed id uses the date-only composite path", async () => {
-  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/60913118-2026-10-12", status: 204, text: "" }]);
-  for (const applyTo of ["one", "future"]) {
-    const r = await t.callTool("skylight_delete_chore", { choreId: ROUTINE_ID, applyTo, confirm: true });
-    assert.equal(r.isError, false);
-    assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/60913118-2026-10-12");
-    assert.equal(t.calls.at(-1)!.url.searchParams.get("apply_to"), applyTo);
-  }
+test("delete all on a time-suffixed id uses the numeric series path", async () => {
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/60913118", status: 204, text: "" }, { method: "DELETE", path: "/api/frames/77/chores/60913118", status: 204, text: "" }]);
   const all = await t.callTool("skylight_delete_chore", { choreId: ROUTINE_ID, applyTo: "all", confirm: true });
-  assert.equal(all.isError, true); // no mock for the series path
+  assert.equal(all.isError, false);
   assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/60913118");
   await t.close();
 });
@@ -487,7 +481,7 @@ test("update chore with a time-suffixed id puts to the series id", async () => {
 test("tool descriptions explain series-date-HHMM ids", async () => {
   const t = await connectTestClient([FRAMES]);
   const tools = (await t.client.listTools()).tools;
-  for (const name of ["skylight_list_chores", "skylight_complete_chore", "skylight_delete_chore"]) {
+  for (const name of ["skylight_list_chores", "skylight_complete_chore"]) {
     assert.match(tools.find((x) => x.name === name)!.description ?? "", /HHMM|-0600/, name);
   }
   await t.close();
@@ -722,5 +716,49 @@ test("points and timer schemas advertise their bounds", async () => {
   const over = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13", profileIds: ["12"], rewardPoints: 10001 }).catch(() => ({ isError: true }));
   assert.equal(over.isError, true);
   assert.ok(!t.calls.some((c) => c.method === "POST"));
+  await t.close();
+});
+
+const ROUTINE_DELETE_MSG = /applyTo: Skylight does not allow deleting a single occurrence of a routine step; use applyTo: "all" to delete the whole step/;
+
+test("delete one/future on a time-suffixed (routine) id is rejected before any request, preview included", async () => {
+  const t = await connectTestClient([FRAMES]);
+  for (const applyTo of ["one", "future"]) {
+    for (const confirm of [false, true]) {
+      const r = await t.callTool("skylight_delete_chore", { choreId: ROUTINE_ID, applyTo, confirm });
+      assert.equal(r.isError, true);
+      assert.match(r.text, ROUTINE_DELETE_MSG);
+    }
+  }
+  assert.ok(!t.calls.some((c) => c.method === "DELETE" || c.url.pathname.endsWith("/chores")));
+  await t.close();
+});
+
+test("delete all on a routine id still works, and non-routine one/future keep the date-only path", async () => {
+  const t = await connectTestClient([FRAMES,
+    { method: "DELETE", path: "/api/frames/77/chores/60913118", status: 204, text: "" },
+    { method: "DELETE", path: "/api/frames/77/chores/5-2026-10-14", status: 204, text: "" }]);
+  assert.equal((await t.callTool("skylight_delete_chore", { choreId: ROUTINE_ID, applyTo: "all", confirm: true })).isError, false);
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("apply_to"), "all");
+  assert.equal((await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", applyTo: "one", confirm: true })).isError, false);
+  await t.close();
+});
+
+test("the server's routine single-instance 400 maps to the same validation error", async () => {
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5-2026-10-14", status: 400, text: '{"message":"you may not edit a single instance of a routine"}' }]);
+  const r = await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", applyTo: "one", confirm: true });
+  assert.equal(r.isError, true);
+  assert.match(r.text, ROUTINE_DELETE_MSG);
+  const other = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5", status: 400, text: "something else" }]);
+  const r2 = await other.callTool("skylight_delete_chore", { choreId: "5", applyTo: "all", confirm: true });
+  assert.match(r2.text, /400/);
+  await other.close();
+  await t.close();
+});
+
+test("delete description says routines can only be deleted as a whole", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const d = (await t.client.listTools()).tools.find((x) => x.name === "skylight_delete_chore")!.description ?? "";
+  assert.match(d, /routine steps can only be deleted as a whole series/i);
   await t.close();
 });

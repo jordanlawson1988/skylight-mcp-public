@@ -1,5 +1,5 @@
 // Opt-in live checks against the real Skylight API using the stored credential.
-// Read-only by default (also fails if balances or reward costs map to nothing). SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), recurrence variants, a morning routine step (BYHOUR, time-suffixed ids), an up-for-grabs chore, clearing fields with null, then a profile (create, update, assign a chore, delete, verify gone).
+// Read-only by default (also fails if balances or reward costs map to nothing). SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), recurrence variants, a morning routine step (BYHOUR, time-suffixed ids, no single-occurrence delete), an up-for-grabs chore, clearing fields with null, then a profile (create, update, assign a chore, delete, verify gone).
 import { createRuntime, assertMacOS, type Runtime } from "../src/runtime.js";
 import { listProfiles } from "../src/tools/profiles.js";
 import { mapChore, mapChores, mapProfile, mapProfiles, mapRewardPoints, mapRewards } from "../src/skylight/types.js";
@@ -146,7 +146,7 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
       step(`recurrence ${v.name} created with ${v.tokens.join(" + ")} and deleted`);
     }
 
-    // Routine step (morning): BYHOUR=6, time-suffixed occurrence ids, complete/revert with instance_time, delete one occurrence by the date-only path.
+    // Routine step (morning): BYHOUR=6, time-suffixed occurrence ids, complete/revert with instance_time, delete only as a whole series.
     const routine = await create(`${PREFIX} routine ${stamp}`, { routine: true, timeOfDay: "morning" });
     live.set(routine.seriesId, true);
     if (!(routine.recurrenceRule ?? "").includes(`BYHOUR=${ROUTINE_SLOTS.morning}`)) throw new Error(`routine rule lacks BYHOUR=6: ${routine.recurrenceRule}`);
@@ -163,14 +163,13 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
       await rt.client.request({ method: "PUT", path: `${base}/${plan.seriesId}/completions`, body: plan.body });
     }
     step("routine occurrence completed and reverted with instance_time");
-    const tomorrowRoutine = routineWindow.find((c) => c.seriesId === routine.seriesId && c.instanceDate === addDays(today, 1));
-    if (!tomorrowRoutine) throw new Error("tomorrow's routine occurrence not listed");
-    const del = deletePathId(tomorrowRoutine.id, "one");
-    await rt.client.request({ method: "DELETE", path: `${base}/${del.pathId}`, query: { apply_to: "one" } });
-    const afterRoutine = await list(today, addDays(today, 3));
-    if (afterRoutine.some((c) => c.id === tomorrowRoutine.id)) throw new Error(`routine occurrence ${tomorrowRoutine.id} still listed after apply_to=one on ${del.pathId}`);
-    if (!afterRoutine.some((c) => c.seriesId === routine.seriesId)) throw new Error("whole routine series vanished after apply_to=one");
-    step(`routine occurrence deleted via date-only path ${del.pathId}`);
+    // Routines are all-or-nothing: the tool layer must refuse one/future for a time-suffixed id before any request.
+    for (const applyTo of ["one", "future"]) {
+      let message = "";
+      try { deletePathId(todays.id, applyTo); } catch (e) { message = e instanceof Error ? e.message : String(e); }
+      if (!message.includes("Skylight does not allow deleting a single occurrence of a routine step")) throw new Error(`deletePathId did not reject applyTo=${applyTo} for routine id ${todays.id}: "${message}"`);
+    }
+    step("routine one/future delete rejected by the tool helper");
     await rt.client.request({ method: "DELETE", path: `${base}/${routine.seriesId}`, query: { apply_to: "all" } });
     live.delete(routine.seriesId);
     step("routine series deleted");

@@ -78,7 +78,7 @@ Verified live on 2026-10-12 against app.ourskylight.com.
    - Recurring, path numeric series id + `?apply_to=all` deletes the whole series. Series id with no `apply_to` gives 400 `you must have a valid value for apply_to`.
    - Recurring, path composite id `<series>-<date>` + `?apply_to=one` deletes only that occurrence (verified).
    - Recurring, path composite id + `?apply_to=future` deletes that occurrence and all later ones (verified).
-   - For a routine-step occurrence (`<series>-<date>-<HHMM>`) the tool sends the date-only `<series>-<date>` path; whether the time is also needed is checked by the live smoke.
+   - Routines are all-or-nothing: `DELETE /chores/<series>-<date>?apply_to=one` (and `future`) on a routine step returns 400 `{"message":"you may not edit a single instance of a routine"}`. Routine steps can only be deleted with `apply_to=all`; `one`/`future` apply to regular recurring chores only. The tool rejects `one`/`future` for time-suffixed ids before any request.
 6. `GET /chores/{id}` returns 404 (no single-chore endpoint). The list is `GET /chores?after=&before=&include_late=true&include_up_for_grabs=true&filter=linked_to_profile`.
 7. Chore attributes also include `description`, `timer_seconds`, `position`, `completed_at`, `completed_on` and `up_for_grabs`.
 8. Routines (`routine: true`) on create:

@@ -124,7 +124,16 @@ export function planCompletion(args: { choreId: string; instanceDate?: string | 
   return { seriesId: ref.seriesId, instanceDate, status, body };
 }
 
-/** The id segment for DELETE: the numeric series id, or `<series>-<date>` (date only, even for routine steps) when applyTo is "one" or "future". */
+const ROUTINE_DELETE_MESSAGE = "Skylight does not allow deleting a single occurrence of a routine step; use applyTo: \"all\" to delete the whole step";
+const SERVER_ROUTINE_DELETE_MESSAGE = "you may not edit a single instance of a routine";
+
+/** Routine steps are all-or-nothing on the server; map its 400 to the same guidance the tool gives up front. */
+function mapDeleteError(e: unknown): unknown {
+  if (e instanceof SkylightApiError && e.status === 400 && e.message.includes(SERVER_ROUTINE_DELETE_MESSAGE)) return new ValidationError("applyTo", ROUTINE_DELETE_MESSAGE);
+  return e;
+}
+
+/** The id segment for DELETE: the numeric series id, or `<series>-<date>` when applyTo is "one" or "future". Routine occurrences (time-suffixed ids) cannot be deleted singly: throws ValidationError. */
 export function deletePathId(choreId: string, applyTo: string | undefined, instanceDate?: string | undefined): { pathId: string; seriesId: string; instanceDate: string | null; anchored: boolean } {
   const ref = parseChoreId(choreId, "choreId");
   const date = resolveInstanceDate(ref.instanceDate, instanceDate);
@@ -132,6 +141,7 @@ export function deletePathId(choreId: string, applyTo: string | undefined, insta
   if (anchored && date === null) {
     throw new ValidationError("instanceDate", `applyTo "${applyTo}" needs the occurrence date: pass a composite choreId (seriesId-YYYY-MM-DD) or instanceDate`);
   }
+  if (anchored && ref.instanceTime !== null) throw new ValidationError("applyTo", ROUTINE_DELETE_MESSAGE);
   return { pathId: anchored ? `${ref.seriesId}-${date}` : ref.seriesId, seriesId: ref.seriesId, instanceDate: date, anchored };
 }
 
@@ -282,7 +292,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_delete_chore",
     {
       title: "Delete a chore",
-      description: "Delete a chore or routine step. One-time chore: omit applyTo. Recurring chore: applyTo \"all\" deletes every occurrence, \"future\" deletes the given occurrence and all later ones, \"one\" deletes only the given occurrence. \"one\" and \"future\" need the occurrence date: pass a composite choreId such as \"123-2026-10-13\" (or \"123-2026-10-13-0600\" for a routine step, exactly as listed) or the plain id plus instanceDate (both come from skylight_list_chores). Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
+      description: "Delete a chore or routine step. Routine steps can only be deleted as a whole series (applyTo \"all\"); \"one\" and \"future\" are for regular recurring chores only. One-time chore: omit applyTo. Recurring chore: applyTo \"all\" deletes every occurrence, \"future\" deletes the given occurrence and all later ones, \"one\" deletes only the given occurrence. \"one\" and \"future\" need the occurrence date: pass a composite choreId such as \"123-2026-10-13\" or the plain id plus instanceDate (both come from skylight_list_chores). Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
       inputSchema: {
         choreId: z.string().describe("Chore id exactly as returned by skylight_list_chores: plain, series-date or series-date-HHMM."),
         instanceDate: z.string().optional().describe("YYYY-MM-DD occurrence to anchor applyTo \"one\" or \"future\" on, if choreId is the plain series id."),
@@ -303,7 +313,11 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
           message: `Nothing was deleted. This would delete ${scope}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }
-      await ctx.client.request({ method: "DELETE", path: `${choresPath(frameId)}/${path}`, query: applyTo === undefined ? {} : { apply_to: applyTo } });
+      try {
+        await ctx.client.request({ method: "DELETE", path: `${choresPath(frameId)}/${path}`, query: applyTo === undefined ? {} : { apply_to: applyTo } });
+      } catch (e) {
+        throw mapDeleteError(e);
+      }
       return { deleted: true, seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null };
     })
   );
