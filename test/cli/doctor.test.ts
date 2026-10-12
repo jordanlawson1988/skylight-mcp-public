@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { doctor } from "../../src/cli/doctor.js";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { doctor, stableNodePath } from "../../src/cli/doctor.js";
 import { createRuntime } from "../../src/runtime.js";
 import { createFakeKeychain } from "../helpers/fake-keychain.js";
 import { createMockFetch } from "../helpers/mock-fetch.js";
@@ -20,7 +22,7 @@ test("doctor prints status, profiles and a Claude Desktop config block", async (
   out = await doctor(rt, { serverPath: "/abs/dist/server.js" });
   assert.match(out, /Logged in/);
   assert.match(out, /Ellie \(12\)/);
-  assert.ok(out.includes(`"command": ${JSON.stringify(process.execPath)}`));
+  assert.ok(out.includes(`"command": ${JSON.stringify(stableNodePath())}`));
   assert.match(process.execPath, /node(\.exe)?$/);
   assert.match(out, /Frames:\s+77 \(L\)/);
   assert.match(out, /\/abs\/dist\/server\.js/);
@@ -50,5 +52,34 @@ test("doctor says the session expired when the refresh is rejected", async () =>
   const out = await doctor(rt, { serverPath: "/abs/dist/server.js" });
   assert.match(out, /session expired or revoked\. Run: skylight-mcp login/);
   assert.doesNotMatch(out, /Logged in/);
+  await cleanup();
+});
+
+test("stableNodePath prefers a candidate symlink that resolves to the running node", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const cellar = path.join(dir, "Cellar", "node", "25.0.0", "bin");
+  await mkdir(cellar, { recursive: true });
+  const real = path.join(cellar, "node");
+  await writeFile(real, "");
+  await mkdir(path.join(dir, "bin"));
+  const other = path.join(dir, "bin", "other-node");
+  await writeFile(other, "");
+  const stable = path.join(dir, "bin", "node");
+  await symlink(real, stable);
+  const missing = path.join(dir, "nope", "node");
+  assert.equal(stableNodePath({ execPath: real, candidates: [missing, other, stable] }), stable);
+  // execPath itself may already be the symlink
+  assert.equal(stableNodePath({ execPath: stable, candidates: [stable] }), stable);
+  await cleanup();
+});
+
+test("stableNodePath falls back to execPath when no candidate matches", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const real = path.join(dir, "node");
+  const other = path.join(dir, "other");
+  await writeFile(real, "");
+  await writeFile(other, "");
+  assert.equal(stableNodePath({ execPath: real, candidates: [other, path.join(dir, "missing")] }), real);
+  assert.equal(stableNodePath({ execPath: path.join(dir, "gone"), candidates: [real] }), path.join(dir, "gone"));
   await cleanup();
 });
