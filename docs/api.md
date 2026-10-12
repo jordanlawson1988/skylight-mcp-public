@@ -27,7 +27,7 @@ Nothing is guaranteed by Skylight.
   `{ summary, start, start_time, routine, up_for_grabs, recurrence_set, recurring_until, category_ids, reward_points, emoji_icon }`
 - Update: `PUT /api/frames/{frameId}/chores/{id}` with the same attributes plus
   `apply_to`, `apply_to_profiles`, `category_ids`, `after`, `before` (web app `updateChore`).
-- Delete: `DELETE /api/frames/{frameId}/chores/{id}` with body/query `{ apply_to, apply_to_profiles }`.
+- Delete: `DELETE /api/frames/{frameId}/chores/{id}`. `apply_to` is a query parameter on DELETE (and a body field on PUT update); see "Verified chore semantics" below.
   Bulk delete exists (`DELETE .../chores/destroy_multiple` with `{ ids }`) and is deliberately not exposed.
 - Completion: `PUT /api/frames/{frameId}/chores/{seriesId}/completions` with
   `{ status, instance_date, instance_time, category_id, completed_on }`.
@@ -56,7 +56,7 @@ Verified live on 2026-10-12 against app.ourskylight.com.
    - `{id}` MUST be the numeric series id. A composite id gives 422 `{"errors":{"id":["is not a number"]}}`.
    - Recurring chore: body `{ status, instance_date }` works. Omitting `instance_date` gives 422 `instance_date can't be blank`.
    - One-time chore: body `{ status }` only. Sending `instance_date` gives 422 `instance_date must be blank`.
-   - `category_id` gives 422 `category_id must be blank` for a chore assigned to a profile (both recurring and one-time). It is only for up-for-grabs chores (unverified; keep it optional and only send when given).
+   - Finding: `category_id` is rejected with 422 `category_id must be blank` for a chore assigned to a profile (both recurring and one-time). It is believed to be meant only for up-for-grabs chores, but that is unverified; the tool therefore sends it only when `profileId` is given.
    - `status` values: `"complete"` / `"pending"` (`CHORE_STATUS`).
 4. `PUT /chores/{seriesId}` update: `apply_to` goes in the JSON body; works with `"all"` or omitted. A composite id in the path also worked for PUT, but the numeric series id is used for consistency. `one`/`future` on update are unverified and not exposed.
 5. `DELETE /chores/{id}` with `apply_to` as a QUERY param:

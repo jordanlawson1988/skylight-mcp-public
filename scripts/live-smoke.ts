@@ -110,7 +110,7 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
       console.error("leftover check failed:", e instanceof Error ? e.message : e);
     }
   }
-  if (leftoverCount > 0) throw new Error(`${leftoverCount} smoke chore(s) left behind; delete them in the Skylight app`);
+  if (leftoverCount > 0) throw new Error(`${leftoverCount} smoke chore(s) left behind; the ids may be from a prior run; delete them in the Skylight app or with skylight_delete_chore`);
   console.log(`write smoke OK (${steps.join("; ")})`);
 }
 
