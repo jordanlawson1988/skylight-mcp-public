@@ -101,21 +101,53 @@ const DELETE_ROUTES: MockRoute[] = [
   { method: "DELETE", path: `${MEALS}/recipes/900`, json: { meta: { deleted_sitting_ids: [1, "2"] } } },
 ];
 
-test("delete recipe previews the planned meals that use it (next 60 days) and writes nothing", async () => {
+test("delete recipe previews the planned meals that use it (next 60 days), counting distinct meals and dates, and writes nothing", async () => {
   const t = await connectTestClient(DELETE_ROUTES, { now: NOW });
   const keep = await t.callTool("skylight_delete_recipe", { recipeId: "900" });
   const d = keep.data as { confirmed: boolean; wouldDelete: Record<string, unknown>; message: string };
   assert.equal(d.confirmed, false);
-  assert.deepEqual(d.wouldDelete, { id: "900", title: "Tacos", plannedMeals: 3, alsoDeletePlannedMeals: false });
+  assert.deepEqual(d.wouldDelete, { id: "900", title: "Tacos", plannedMeals: 2, plannedDates: 3, alsoDeletePlannedMeals: false });
   assert.match(d.message, /Nothing was deleted/);
-  assert.match(d.message, /3 planned meals/);
-  assert.match(d.message, /NOT be deleted/i);
+  assert.match(d.message, /2 meals \(3 dates\) planned in the next 60 days use it/);
+  assert.match(d.message, /NOT be deleted/);
   const q = t.calls.find((c) => c.url.pathname === `${MEALS}/sittings`)!.url.searchParams;
   assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-12", "2026-12-12"]);
   const also = await t.callTool("skylight_delete_recipe", { recipeId: "900", alsoDeletePlannedMeals: true });
-  assert.match((also.data as { message: string }).message, /ALSO be deleted/);
   assert.equal((also.data as { wouldDelete: { alsoDeletePlannedMeals: boolean } }).wouldDelete.alsoDeletePlannedMeals, true);
   assert.equal(writes(t).length, 0);
+  await t.close();
+});
+
+test("delete recipe message: with alsoDeletePlannedMeals the 60-day count is flagged as a floor and later meals would ALSO go; without it there is no such caveat", async () => {
+  const t = await connectTestClient(DELETE_ROUTES, { now: NOW });
+  const off = (await t.callTool("skylight_delete_recipe", { recipeId: "900" })).data as { message: string };
+  assert.ok(!/further out/i.test(off.message), `no further-out caveat when nothing would be deleted: ${off.message}`);
+  assert.ok(!/ALSO/.test(off.message));
+  const on = (await t.callTool("skylight_delete_recipe", { recipeId: "900", alsoDeletePlannedMeals: true })).data as { message: string };
+  assert.match(on.message, /2 meals \(3 dates\) planned in the next 60 days use it, and they would ALSO be deleted/);
+  assert.match(on.message, /count covers only the next 60 days/i);
+  assert.match(on.message, /meals planned further out with this recipe would ALSO be deleted/);
+  await t.close();
+});
+
+test("delete recipe counts distinct meals, not dates: a daily series is one meal on many dates", async () => {
+  const daily = Array.from({ length: 60 }, (_, i) => new Date(Date.UTC(2026, 9, 13 + i)).toISOString().slice(0, 10));
+  const routes: MockRoute[] = DELETE_ROUTES.map((r) => (r.method === "GET" && r.path === `${MEALS}/sittings` ? { method: "GET", path: r.path, json: { data: [sitting("1", "900", ["2026-10-13"]), sitting("5", "900", daily)] } } : r));
+  const t = await connectTestClient(routes, { now: NOW });
+  const r = await t.callTool("skylight_delete_recipe", { recipeId: "900", alsoDeletePlannedMeals: true });
+  const d = r.data as { wouldDelete: { plannedMeals: number; plannedDates: number }; message: string };
+  assert.deepEqual([d.wouldDelete.plannedMeals, d.wouldDelete.plannedDates], [2, 61]);
+  assert.match(d.message, /2 meals \(61 dates\)/);
+  await t.close();
+});
+
+test("delete recipe message uses singular nouns for one meal on one date", async () => {
+  const routes: MockRoute[] = DELETE_ROUTES.map((r) => (r.method === "GET" && r.path === `${MEALS}/sittings` ? { method: "GET", path: r.path, json: { data: [sitting("1", "900", ["2026-10-13"])] } } : r));
+  const t = await connectTestClient(routes, { now: NOW });
+  const off = (await t.callTool("skylight_delete_recipe", { recipeId: "900" })).data as { message: string };
+  assert.match(off.message, /1 meal \(1 date\) planned in the next 60 days uses it, and it would NOT be deleted/);
+  const on = (await t.callTool("skylight_delete_recipe", { recipeId: "900", alsoDeletePlannedMeals: true })).data as { message: string };
+  assert.match(on.message, /1 meal \(1 date\) planned in the next 60 days uses it, and it would ALSO be deleted/);
   await t.close();
 });
 
@@ -135,7 +167,7 @@ test("delete recipe still deletes when the meal-plan lookup fails on the preview
   const t = await connectTestClient(routes, { now: NOW });
   const r = await t.callTool("skylight_delete_recipe", { recipeId: "900" });
   assert.equal(r.isError, false);
-  assert.equal((r.data as { wouldDelete: { plannedMeals: number | null } }).wouldDelete.plannedMeals, null);
+  assert.deepEqual([(r.data as { wouldDelete: { plannedMeals: number | null } }).wouldDelete.plannedMeals, (r.data as { wouldDelete: { plannedDates: number | null } }).wouldDelete.plannedDates], [null, null]);
   assert.match((r.data as { message: string }).message, /could not check/i);
   await t.close();
 });

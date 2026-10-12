@@ -137,17 +137,23 @@ export function registerRecipeTools(server: McpServer, ctx: ToolContext): void {
         const recipe = await getRecipe(ctx, frameId, id);
         const after = todayIn(ctx.config.timezone, ctx.now());
         const before = addDays(after, RECIPE_LOOKAHEAD_DAYS);
-        let planned: number | null = null;
-        try { planned = explodeSittings(await readSittings(ctx, frameId, after, before), [], { after, before }).filter((r) => r.recipeId === id).length; }
-        catch (e) { if (!(e instanceof SkylightApiError)) throw e; }
-        const n = planned ?? 0;
-        const fate = also ? "ALSO be deleted" : "NOT be deleted";
-        const meals = planned === null ? `Could not check which planned meals use it${also ? ", and they would ALSO be deleted" : ""}.`
-          : `${n} planned meal${n === 1 ? "" : "s"} in the next ${RECIPE_LOOKAHEAD_DAYS} days ${n === 1 ? "uses" : "use"} it, and ${n === 1 ? "it" : "they"} would ${fate}.`;
+        let uses: { meals: number; dates: number } | null = null;
+        try {
+          const rows = explodeSittings(await readSittings(ctx, frameId, after, before), [], { after, before }).filter((r) => r.recipeId === id);
+          uses = { meals: new Set(rows.map((r) => r.mealId)).size, dates: rows.length };
+        } catch (e) { if (!(e instanceof SkylightApiError)) throw e; }
+        const further = " The count covers only the next " + RECIPE_LOOKAHEAD_DAYS + " days: meals planned further out with this recipe would ALSO be deleted.";
+        let meals: string;
+        if (uses === null) {
+          meals = `Could not check which planned meals use it${also ? `, and they would ALSO be deleted, including any planned more than ${RECIPE_LOOKAHEAD_DAYS} days out` : ""}.`;
+        } else {
+          const one = uses.meals === 1;
+          meals = `${uses.meals} meal${one ? "" : "s"} (${uses.dates} date${uses.dates === 1 ? "" : "s"}) planned in the next ${RECIPE_LOOKAHEAD_DAYS} days ${one ? "uses" : "use"} it, and ${one ? "it" : "they"} would ${also ? "ALSO" : "NOT"} be deleted.${also ? further : ""}`;
+        }
         return {
           confirmed: false,
-          wouldDelete: { id, title: recipe.title, plannedMeals: planned, alsoDeletePlannedMeals: also },
-          message: `Nothing was deleted. This would delete the recipe "${recipe.title}". ${meals}${also ? "" : " Meals planned further out are not counted."} Ask the user to confirm, then call again with confirm: true.`,
+          wouldDelete: { id, title: recipe.title, plannedMeals: uses?.meals ?? null, plannedDates: uses?.dates ?? null, alsoDeletePlannedMeals: also },
+          message: `Nothing was deleted. This would delete the recipe "${recipe.title}". ${meals} Ask the user to confirm, then call again with confirm: true.`,
         };
       }
       const json = await ctx.client.request<{ meta?: { deleted_sitting_ids?: unknown } } | null>({ method: "DELETE", path: `${recipesPath(frameId)}/${id}`, query: also ? { apply_to_sittings: true } : {} });
