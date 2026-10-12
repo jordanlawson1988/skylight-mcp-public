@@ -10,7 +10,9 @@ test("tool list contains only expected tools with full annotations", async () =>
   const names = tools.map((x) => x.name).sort();
   assert.ok(names.includes("skylight_auth_status"));
   assert.ok(names.includes("skylight_list_profiles"));
-  for (const bad of ["delete_account", "user_delete", "photo", "device", "invite", "frame_transfer"]) {
+  // Never exposed, even after phase 3 added photos, devices, sharing and account tools: account deletion, frame transfer, and the
+  // features whose behavior is unverified or unsafe (alarms, sleep schedules, device config, frame rename and hide, push preferences, photo privacy).
+  for (const bad of ["delete_account", "user_delete", "frame_transfer", "alarm", "sleep_schedule", "device_config", "rename_frame", "hide_frame", "push", "privacy", "viewab", "public"]) {
     assert.ok(!names.some((n) => n.includes(bad)), `unexpected tool matching ${bad}`);
   }
   for (const tool of tools) {

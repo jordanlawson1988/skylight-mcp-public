@@ -6,6 +6,7 @@ import type { ToolContext } from "./context.js";
 import { registerChoreTools } from "./chores.js";
 import { registerListTools } from "./lists.js";
 import { registerMealTools } from "./meals.js";
+import { registerPhotoTools } from "./photos.js";
 import { registerProfileTools } from "./profiles.js";
 import { registerRecipeTools } from "./recipes.js";
 import { registerRewardTools } from "./rewards.js";
@@ -22,7 +23,7 @@ const REGISTRARS: Record<Toolset, Registrar> = {
   lists: registerListTools,
   calendar: registerCalendarTools,
   meals: (server, ctx) => { registerMealTools(server, ctx); registerRecipeTools(server, ctx); },
-  photos: none,
+  photos: registerPhotoTools,
   devices: none,
   frame: none,
   account: none,
