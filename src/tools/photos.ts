@@ -94,7 +94,12 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const id = assertNumericId(args.photoId, "photoId");
       const body = buildCaptionBody(args.caption);
       const frameId = await ctx.frames.resolve();
-      await ctx.client.request({ method: "PUT", path: `${messagesPath(frameId)}/${id}/caption`, body });
+      try {
+        await ctx.client.request({ method: "PUT", path: `${messagesPath(frameId)}/${id}/caption`, body });
+      } catch (e) {
+        if (e instanceof SkylightApiError && e.status === 404) throw new ValidationError("photoId", "no photo with that id on this frame");
+        throw e;
+      }
       return { id, caption: body.caption, updated: true };
     })
   );
@@ -201,7 +206,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
     "skylight_add_photos_to_album",
     {
       title: "Add photos to an album",
-      description: `Add up to ${MAX_ALBUM_PHOTOS} photos or videos to an album. The photos stay on the frame and in any other album. Adding one that is already in the album changes nothing.`,
+      description: `Add up to ${MAX_ALBUM_PHOTOS} photos or videos to an album. The photos stay on the frame and in any other album. Adding one that is already in the album changes nothing. Built-in albums (editable: false) are refused.`,
       inputSchema: { albumId: albumIdSchema, photoIds: z.array(z.string()).min(1).max(MAX_ALBUM_PHOTOS).describe("Photo ids from skylight_list_photos.") },
       annotations: ANNOTATIONS.update,
     },
@@ -209,6 +214,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const photoIds = assertPhotoIds(args.photoIds, "photoIds", MAX_ALBUM_PHOTOS);
       const body = buildAlbumMembershipBody(args.albumId, photoIds);
       const frameId = await ctx.frames.resolve();
+      await getEditableAlbum(ctx, frameId, String(body.album_ids[0]));
       await ctx.client.request({ method: "POST", path: `${albumsPath(frameId)}/add_to`, body });
       return { added: photoIds.length, albumId: String(body.album_ids[0]), photoIds };
     })
@@ -218,7 +224,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
     "skylight_remove_photos_from_album",
     {
       title: "Remove photos from an album",
-      description: `Take up to ${MAX_ALBUM_PHOTOS} photos or videos out of an album. They stay on the frame; only their place in this album goes.`,
+      description: `Take up to ${MAX_ALBUM_PHOTOS} photos or videos out of an album. They stay on the frame; only their place in this album goes. Built-in albums (editable: false) are refused.`,
       inputSchema: { albumId: albumIdSchema, photoIds: z.array(z.string()).min(1).max(MAX_ALBUM_PHOTOS).describe("Photo ids from skylight_list_photos.") },
       annotations: ANNOTATIONS.update,
     },
@@ -226,6 +232,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const photoIds = assertPhotoIds(args.photoIds, "photoIds", MAX_ALBUM_PHOTOS);
       const body = buildAlbumMembershipBody(args.albumId, photoIds);
       const frameId = await ctx.frames.resolve();
+      await getEditableAlbum(ctx, frameId, String(body.album_ids[0]));
       await ctx.client.request({ method: "POST", path: `${albumsPath(frameId)}/remove_from`, body });
       return { removed: photoIds.length, albumId: String(body.album_ids[0]), photoIds };
     })

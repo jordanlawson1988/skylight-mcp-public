@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, cleanParagraph, assertEmail, assertEmails, assertEmoji, assertPoints } from "../../src/skylight/ids.js";
+import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, cleanParagraph, sameNumericId, assertEmail, assertEmails, assertEmoji, assertPoints } from "../../src/skylight/ids.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 test("assertId accepts simple ids and numbers", () => {
@@ -109,4 +109,14 @@ test("assertEmails dedupes case-insensitively, keeps order, bounds the count and
   assert.deepEqual(assertEmails([], "invitedEmails", 20), []);
   assert.throws(() => assertEmails(Array.from({ length: 21 }, (_, i) => `u${i}@x.com`), "invitedEmails", 20), ValidationError);
   assert.throws(() => assertEmails(["a@x.com", "nope"], "invitedEmails", 20), (e: unknown) => e instanceof ValidationError && /invitedEmails/.test(e.message));
+});
+
+test("sameNumericId compares ids as integers, whatever their spelling, and never matches non-numbers", () => {
+  assert.equal(sameNumericId("3001", "3001"), true);
+  assert.equal(sameNumericId("03001", "3001"), true);
+  assert.equal(sameNumericId(3001 as unknown as string, "3001"), true);
+  assert.equal(sameNumericId("3001", "3002"), false);
+  assert.equal(sameNumericId("abc", "abc"), false);
+  assert.equal(sameNumericId("", ""), false);
+  assert.equal(sameNumericId("1.5", "1.5"), false);
 });

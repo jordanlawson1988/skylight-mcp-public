@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildDeviceUpdateBody, MAX_BRIGHTNESS, MAX_DEVICE_NAME_LENGTH, MAX_SLIDESHOW_SPEED, MAX_SLIDESHOW_STYLE } from "../skylight/device-payload.js";
 import { ValidationError } from "../skylight/errors.js";
-import { assertNumericId } from "../skylight/ids.js";
+import { assertNumericId, sameNumericId } from "../skylight/ids.js";
 import { mapAlbums, mapDevice, mapDevices, type Device } from "../skylight/types.js";
 import { ALL_PHOTOS } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
@@ -85,7 +85,7 @@ export function registerDeviceTools(server: McpServer, ctx: ToolContext): void {
       const body = buildDeviceUpdateBody(settings);
       const frameId = await ctx.frames.resolve();
       if (settings.albumId !== undefined && settings.albumId !== ALL_PHOTOS) {
-        if (!mapAlbums(await ctx.client.request({ method: "GET", path: `/api/frames/${frameId}/albums` })).some((a) => a.id === settings.albumId)) {
+        if (!mapAlbums(await ctx.client.request({ method: "GET", path: `/api/frames/${frameId}/albums` })).some((a) => sameNumericId(a.id, settings.albumId!))) {
           throw new ValidationError("albumId", `no album ${settings.albumId}; use skylight_list_albums, or "${ALL_PHOTOS}" for every photo`);
         }
       }

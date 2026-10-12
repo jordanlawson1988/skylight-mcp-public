@@ -12,6 +12,13 @@ export function assertId(value: string | number, field: string): string {
   return s;
 }
 
+/** True when both are whole-number ids with the same value, however they are spelled ("3001" and "03001"); non-numbers never match. */
+export function sameNumericId(a: string | number, b: string | number): boolean {
+  const x = typeof a === "number" ? a : /^\d+$/.test(a) ? Number(a) : NaN;
+  const y = typeof b === "number" ? b : /^\d+$/.test(b) ? Number(b) : NaN;
+  return Number.isSafeInteger(x) && x === y;
+}
+
 /** A positive decimal id of at most 15 digits (list item ids), returned as a string; the API wants them as JSON numbers in bodies. */
 export function assertNumericId(value: string | number, field: string): string {
   const s = typeof value === "number" ? String(value) : value;

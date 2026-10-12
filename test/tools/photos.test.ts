@@ -160,6 +160,33 @@ test("rename and delete album refuse an unknown album and one that is not editab
   await t.close();
 });
 
+test("add and remove photos refuse an unknown or built-in album with no POST (the same check as rename and delete)", async () => {
+  const locked = { id: "3009", type: "album_with_messages", attributes: { title: "Favorites", kind: "system", editable: false, photos_count: 5, videos_count: 0 } };
+  const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/albums`, json: { data: [...albums.data, locked] } }, { method: "POST", path: /albums/, json: {} }]);
+  for (const tool of ["skylight_add_photos_to_album", "skylight_remove_photos_from_album"]) {
+    const unknown = await t.callTool(tool, { albumId: "9999", photoIds: ["1"] });
+    assert.equal(unknown.isError, true, tool);
+    assert.match(unknown.text, /albumId: no album with that id/);
+    const builtIn = await t.callTool(tool, { albumId: "3009", photoIds: ["1"] });
+    assert.equal(builtIn.isError, true, tool);
+    assert.match(builtIn.text, /built-in album that cannot be changed/);
+  }
+  assert.equal(writes(t).length, 0);
+  await t.close();
+});
+
+test("update photo caption maps a 404 to a validation error and lets other failures through", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: `${F}/messages/42/caption`, status: 404, text: '{"error":"not found"}' }, { method: "PUT", path: `${F}/messages/43/caption`, status: 500, text: "boom" }]);
+  const missing = await t.callTool("skylight_update_photo_caption", { photoId: "42", caption: "x" });
+  assert.equal(missing.isError, true);
+  assert.equal(missing.text, "Invalid input. photoId: no photo with that id on this frame");
+  const broken = await t.callTool("skylight_update_photo_caption", { photoId: "43", caption: "x" });
+  assert.equal(broken.isError, true);
+  assert.match(broken.text, /500/);
+  assert.doesNotMatch(broken.text, /no photo with that id/);
+  await t.close();
+});
+
 test("delete album previews that the photos stay on the frame, then DELETEs on confirm", async () => {
   const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/albums`, json: albums }, { method: "DELETE", path: `${F}/albums/3001`, json: {} }]);
   const r = await t.callTool("skylight_delete_album", { albumId: "3001" });
@@ -175,8 +202,8 @@ test("delete album previews that the photos stay on the frame, then DELETEs on c
   await t.close();
 });
 
-test("add and remove photos POST numeric album_ids and message_ids", async () => {
-  const t = await connectTestClient([FRAMES, { method: "POST", path: `${F}/albums/add_to`, json: {} }, { method: "POST", path: `${F}/albums/remove_from`, json: {} }]);
+test("add and remove photos POST numeric album_ids and message_ids, after checking the album", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/albums`, json: albums }, { method: "POST", path: `${F}/albums/add_to`, json: {} }, { method: "POST", path: `${F}/albums/remove_from`, json: {} }]);
   const added = await t.callTool("skylight_add_photos_to_album", { albumId: "3001", photoIds: ["1794275894", "1794275814"] });
   assert.deepEqual(added.data, { added: 2, albumId: "3001", photoIds: ["1794275894", "1794275814"] });
   const removed = await t.callTool("skylight_remove_photos_from_album", { albumId: "3001", photoIds: ["1794275894"] });
@@ -185,11 +212,12 @@ test("add and remove photos POST numeric album_ids and message_ids", async () =>
     [`${F}/albums/add_to`, { album_ids: [3001], message_ids: [1794275894, 1794275814] }],
     [`${F}/albums/remove_from`, { album_ids: [3001], message_ids: [1794275894] }],
   ]);
+  assert.equal(t.calls.filter((c) => c.url.pathname === `${F}/albums`).length, 2, "each call looks the album up first");
   await t.close();
 });
 
 test("add and remove photos validate: 1..100 distinct numeric ids and a numeric album, before any request", async () => {
-  const t = await connectTestClient([FRAMES, { method: "POST", path: `${F}/albums/add_to`, json: {} }]);
+  const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/albums`, json: albums }, { method: "POST", path: `${F}/albums/add_to`, json: {} }]);
   for (const tool of ["skylight_add_photos_to_album", "skylight_remove_photos_from_album"]) {
     for (const args of [{ albumId: "3001", photoIds: [] }, { albumId: "3001", photoIds: ["1", "1"] }, { albumId: "summer", photoIds: ["1"] }, { albumId: "3001", photoIds: ["x"] }, { albumId: "3001", photoIds: Array.from({ length: 101 }, (_, i) => String(i + 1)) }]) {
       assert.equal((await t.callTool(tool, args)).isError, true, `${tool} ${JSON.stringify(args).slice(0, 60)}`);
