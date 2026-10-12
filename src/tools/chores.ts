@@ -5,7 +5,7 @@ import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors
 import { assertDate, assertId, assertTime, localDateString, parseChoreId } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
-import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES } from "../skylight/vocab.js";
+import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, ROUTINE_SLOT_NAMES } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { ANNOTATIONS, run } from "./result.js";
 
@@ -23,9 +23,10 @@ export const choreInputShape = {
   summary: z.string().describe("Chore title, e.g. \"Feed the dog\"."),
   start: z.string().describe("First date YYYY-MM-DD."),
   profileIds: z.array(z.string()).min(1).max(20).describe("Profile ids from skylight_list_profiles. One chore is created per profile."),
-  startTime: z.string().optional().describe("HH:mm 24-hour. Routines use this for ordering."),
+  startTime: z.string().optional().describe("HH:mm 24-hour. Not allowed on routine steps."),
   recurrence: recurrenceShape.optional().describe("Omit for a one-off chore."),
-  routine: z.boolean().optional().describe("true makes this a routine step instead of a chore. Default false."),
+  routine: z.boolean().optional().describe("true makes this a routine step instead of a chore (needs timeOfDay, no startTime; recurrence defaults to daily). Default false."),
+  timeOfDay: z.enum(ROUTINE_SLOT_NAMES).optional().describe("Routine steps only: which routine the step belongs to. Required when routine is true."),
   upForGrabs: z.boolean().optional().describe("true lets any profile claim it. Default false."),
   rewardPoints: z.number().int().optional().describe("Points earned on completion."),
   emoji: z.string().optional().describe("Single emoji icon."),
@@ -215,6 +216,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         startTime: choreInputShape.startTime,
         recurrence: choreInputShape.recurrence,
         routine: choreInputShape.routine,
+        timeOfDay: choreInputShape.timeOfDay,
         upForGrabs: choreInputShape.upForGrabs,
         rewardPoints: choreInputShape.rewardPoints,
         emoji: choreInputShape.emoji,

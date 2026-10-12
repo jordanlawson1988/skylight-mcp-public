@@ -76,7 +76,7 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | `skylight_create_profile` | Creates a profile (`kind: "profile"`, a person with a chore-chart column, the default) or a label (`kind: "label"`, a calendar category such as Birthdays). Needs `name` and a `#RRGGBB` `color`. |
 | `skylight_update_profile` | Changes a profile's `name`, `color` or `kind`. Only the fields you pass change. `kind: "label"` is Skylight's "Convert to Label", the non-destructive way to retire a person; the profile keeps its events. |
 | `skylight_delete_profile` | Deletes a profile or label. Returns a preview and changes nothing unless `confirm: true` is set. Optional `reassignToProfileId` moves its chores and events to another profile instead of deleting them. |
-| `skylight_list_chores` | Lists chores and routine steps in a date range (default today through 14 days ahead), sorted by `instanceDate` then summary. Overdue occurrences are only included with `includeLate: true` (default false; can be large). Recurring occurrences carry a `seriesId` and an `instanceDate`; ids of later occurrences look like `123-2026-10-13`. |
+| `skylight_list_chores` | Lists chores and routine steps in a date range (default today through 14 days ahead), sorted by `instanceDate` then summary. Overdue occurrences are only included with `includeLate: true` (default false; can be large). Recurring occurrences carry a `seriesId` and an `instanceDate`; ids of later occurrences look like `123-2026-10-13`, and routine-step occurrences like `123-2026-10-13-0600` (pass ids exactly as listed). |
 | `skylight_create_chore` | Creates one chore or routine step for one or more profiles. Returns `{ created, ids }`, because Skylight makes one chore per assigned profile. |
 | `skylight_bulk_create_chores` | Creates up to 50 chores in one call. Validates all items first and supports `dryRun: true`. |
 | `skylight_update_chore` | Changes fields on an existing chore. Only the fields you pass change. Accepts plain or composite ids (the series id is used). `applyTo` accepts only `"all"`; per-occurrence scopes are not available for update. |
@@ -90,7 +90,17 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 
 - "Show me the profiles on our Skylight, then do a dry run of a weekly chore schedule: Ellie empties the dishwasher every Monday, Wednesday and Friday, and Sam takes out the trash every Tuesday. Don't create anything yet."
 - "Create these chores starting next Monday: make bed (daily, 5 points) for Ellie and Sam, feed the dog (daily, morning) for Sam, and set the table (weekdays) for Ellie."
-- "Add a morning routine for Ellie starting tomorrow: brush teeth at 7:00, get dressed at 7:10, pack backpack at 7:20. Run it as a dry run first and show me the payloads."
+- "Add a morning routine for Ellie starting tomorrow with three steps: brush teeth, get dressed, pack backpack. Run it as a dry run first and show me the payloads."
+
+Routine steps are chores with `routine: true` and a `timeOfDay` of `morning`, `afternoon` or `evening` (Skylight's only three routine slots). They take no times: a step's `startTime` is derived by Skylight from its slot, and the recurrence defaults to daily. The order of steps inside a routine is Skylight's `position` field, assigned in creation order; a tool to reorder steps is planned for a later phase. For example, the three-step prompt above creates:
+
+```json
+{ "chores": [
+  { "summary": "Brush teeth", "start": "2026-10-13", "profileIds": ["<Ellie>"], "routine": true, "timeOfDay": "morning" },
+  { "summary": "Get dressed", "start": "2026-10-13", "profileIds": ["<Ellie>"], "routine": true, "timeOfDay": "morning" },
+  { "summary": "Pack backpack", "start": "2026-10-13", "profileIds": ["<Ellie>"], "routine": true, "timeOfDay": "morning" }
+] }
+```
 
 ## Development
 

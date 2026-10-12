@@ -1,5 +1,6 @@
 import { ID_PATTERN, parseChoreId, type ChoreRef } from "./ids.js";
-import { kindFromLinked, type ProfileKind } from "./vocab.js";
+import { hourFromRrule } from "./rrule.js";
+import { kindFromLinked, slotFromHour, slotFromStartTime, type ProfileKind, type RoutineSlot } from "./vocab.js";
 
 export interface Profile { id: string; name: string; color: string | null; kind: ProfileKind | null; onChoreChart: boolean | null }
 export interface Chore {
@@ -11,6 +12,8 @@ export interface Chore {
   instanceDate: string | null;
   /** "HH:mm" of a routine-step occurrence: the time in a time-suffixed id, else attributes.start_time for routine steps. Null otherwise. */
   instanceTime: string | null;
+  /** Which routine a routine step belongs to (from its time or the rule's BYHOUR). Null for ordinary chores. */
+  timeOfDay: RoutineSlot | null;
 }
 export interface RewardPoints { profileId: string; points: number; lifetimePoints: number | null }
 export interface Reward {
@@ -69,17 +72,20 @@ export function mapChore(resource: unknown): Chore | null {
   const recurring = bool(a.recurring) ?? rule !== null;
   let ref: ChoreRef;
   try { ref = parseChoreId(id, "id"); } catch { ref = { seriesId: id, instanceDate: null, instanceTime: null }; }
+  const routine = bool(a.routine) ?? false;
+  const instanceTime = ref.instanceTime ?? (routine ? str(a.start_time) : null);
   return {
     id, summary,
     start: str(a.start), startTime: str(a.start_time), status: str(a.status),
-    routine: bool(a.routine) ?? false,
+    routine,
     recurring,
     recurrenceRule: rule,
     rewardPoints: num(a.reward_points), emoji: str(a.emoji_icon),
     profileIds: relationshipIds(r),
     seriesId: idOf(a.series) ?? ref.seriesId,
     instanceDate: ref.instanceDate ?? (recurring ? str(a.start) : null),
-    instanceTime: ref.instanceTime ?? (bool(a.routine) === true ? str(a.start_time) : null),
+    instanceTime,
+    timeOfDay: routine ? slotFromStartTime(instanceTime) ?? slotFromHour(hourFromRrule(rule)) : null,
   };
 }
 

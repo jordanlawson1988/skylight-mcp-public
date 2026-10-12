@@ -34,7 +34,7 @@ test("mapChores flattens attributes and category relationships", () => {
     relationships: { categories: { data: [{ id: "12" }, { id: "13" }] } },
   }] });
   assert.equal(out.length, 2);
-  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"], seriesId: "900", instanceDate: "2026-10-13", instanceTime: null });
+  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"], seriesId: "900", instanceDate: "2026-10-13", instanceTime: null, timeOfDay: null });
   assert.deepEqual(out[1]!.profileIds, ["12", "13"]);
   assert.equal(out[1]!.recurrenceRule, "RRULE:FREQ=WEEKLY");
   assert.equal(out[1]!.routine, false);
@@ -71,6 +71,8 @@ test("mapChores maps time-suffixed routine occurrence ids from the live fixture"
   assert.equal(routine.seriesId, "60913118");
   assert.equal(routine.instanceDate, "2026-10-12");
   assert.equal(routine.instanceTime, "06:00");
+  assert.equal(routine.timeOfDay, "morning");
+  assert.equal(out[1]!.timeOfDay, null);
   assert.equal(routine.routine, true);
   assert.equal(out[1]!.instanceTime, null);
   assert.equal(out[1]!.instanceDate, "2026-05-19");
@@ -82,6 +84,15 @@ test("instanceTime falls back to start_time for routine steps only", () => {
     { id: "8", attributes: { summary: "N", routine: false, start_time: "14:00" } },
   ] });
   assert.deepEqual(out.map((c) => c.instanceTime), ["14:00", null]);
+});
+
+test("timeOfDay comes from start_time, else BYHOUR, for routine steps only", () => {
+  const out = mapChores({ data: [
+    { id: "1", attributes: { summary: "A", routine: true, start_time: "14:00" } },
+    { id: "2", attributes: { summary: "B", routine: true, recurrence_set: ["RRULE:FREQ=DAILY;BYHOUR=20"] } },
+    { id: "3", attributes: { summary: "C", routine: false, start_time: "06:00" } },
+  ] });
+  assert.deepEqual(out.map((c) => c.timeOfDay), ["afternoon", "evening", null]);
 });
 
 test("mappers tolerate missing data and skip malformed items", () => {

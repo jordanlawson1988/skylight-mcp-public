@@ -43,12 +43,13 @@ test("create chore posts create_multiple body", async () => {
 
 test("bulk create: dryRun makes no requests and returns payloads", async () => {
   const t = await connectTestClient([FRAMES]);
-  const r = await t.callTool("skylight_bulk_create_chores", { dryRun: true, chores: [{ summary: "A", start: "2026-10-13", profileIds: ["12"] }, { summary: "B", start: "2026-10-13", profileIds: ["13"], routine: true }] });
+  const r = await t.callTool("skylight_bulk_create_chores", { dryRun: true, chores: [{ summary: "A", start: "2026-10-13", profileIds: ["12"] }, { summary: "B", start: "2026-10-13", profileIds: ["13"], routine: true, timeOfDay: "morning" }] });
   assert.equal(r.isError, false);
   const d = r.data as { dryRun: boolean; results: Array<{ ok: boolean; payload?: { routine: boolean } }> };
   assert.equal(d.dryRun, true);
   assert.equal(d.results.length, 2);
   assert.equal(d.results[1]!.payload!.routine, true);
+  assert.deepEqual((d.results[1]!.payload as unknown as { recurrence_set: string[] }).recurrence_set, ["RRULE:FREQ=DAILY;BYHOUR=6"]);
   assert.ok(!t.calls.some((c) => c.method === "POST"));
   await t.close();
 });
@@ -488,5 +489,53 @@ test("tool descriptions explain series-date-HHMM ids", async () => {
   for (const name of ["skylight_list_chores", "skylight_complete_chore", "skylight_delete_chore"]) {
     assert.match(tools.find((x) => x.name === name)!.description ?? "", /HHMM|-0600/, name);
   }
+  await t.close();
+});
+
+test("create routine step sends blank start_time, BYHOUR and routine: true", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/create_multiple", json: { data: [chore("5", "Brush teeth")] } }]);
+  const r = await t.callTool("skylight_create_chore", { summary: "Brush teeth", start: "2026-10-13", profileIds: ["12"], routine: true, timeOfDay: "evening" });
+  assert.equal(r.isError, false);
+  const body = t.calls.at(-1)!.body as Record<string, unknown>;
+  assert.equal(body.routine, true);
+  assert.equal(body.start_time, null);
+  assert.deepEqual(body.recurrence_set, ["RRULE:FREQ=DAILY;BYHOUR=20"]);
+  await t.close();
+});
+
+test("create routine rejects a missing timeOfDay or a startTime, and timeOfDay on a plain chore, without a request", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const base = { summary: "x", start: "2026-10-13", profileIds: ["12"] };
+  const cases: Array<[Record<string, unknown>, RegExp]> = [
+    [{ routine: true }, /routine steps need timeOfDay/],
+    [{ routine: true, timeOfDay: "morning", startTime: "06:00" }, /routines use timeOfDay, not startTime/],
+    [{ timeOfDay: "morning" }, /timeOfDay is only for routine steps/],
+  ];
+  for (const [extra, re] of cases) {
+    const r = await t.callTool("skylight_create_chore", { ...base, ...extra });
+    assert.equal(r.isError, true);
+    assert.match(r.text, re);
+  }
+  const bad = await t.callTool("skylight_create_chore", { ...base, routine: true, timeOfDay: "noon" }).catch(() => ({ isError: true }));
+  assert.equal(bad.isError, true);
+  assert.ok(!t.calls.some((c) => c.method === "POST"));
+  await t.close();
+});
+
+test("update routine step sends BYHOUR with the full recurrence", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "x") } }]);
+  const r = await t.callTool("skylight_update_chore", { choreId: "5", timeOfDay: "afternoon", recurrence: { frequency: "daily" } });
+  assert.equal(r.isError, false);
+  assert.deepEqual(t.calls.at(-1)!.body, { recurrence_set: ["RRULE:FREQ=DAILY;BYHOUR=14"], recurring_until: null });
+  await t.close();
+});
+
+test("tool schemas expose timeOfDay with the slot names and describe startTime as not for routines", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const tools = (await t.client.listTools()).tools;
+  const create = tools.find((x) => x.name === "skylight_create_chore")!;
+  const props = create.inputSchema.properties as Record<string, { enum?: string[]; description?: string }>;
+  assert.deepEqual(props.timeOfDay!.enum, ["morning", "afternoon", "evening"]);
+  assert.match(props.startTime!.description ?? "", /Not allowed on routine steps/);
   await t.close();
 });

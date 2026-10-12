@@ -1,6 +1,7 @@
 import { ValidationError } from "./errors.js";
 import { assertDate, assertEmoji, assertId, assertPoints, assertTime, cleanText } from "./ids.js";
 import { buildRrule, type Recurrence } from "./rrule.js";
+import { ROUTINE_SLOTS, type RoutineSlot } from "./vocab.js";
 
 export interface ChoreInput {
   summary: string;
@@ -9,6 +10,8 @@ export interface ChoreInput {
   startTime?: string;
   recurrence?: Recurrence;
   routine?: boolean;
+  /** Routine steps only: which routine (morning, afternoon, evening). Becomes BYHOUR in the recurrence rule. */
+  timeOfDay?: RoutineSlot;
   upForGrabs?: boolean;
   rewardPoints?: number;
   emoji?: string;
@@ -37,8 +40,30 @@ function profileIds(ids: string[]): string[] {
   return out;
 }
 
+function slotHour(slot: RoutineSlot | undefined): (typeof ROUTINE_SLOTS)[RoutineSlot] {
+  const hour = slot === undefined ? undefined : ROUTINE_SLOTS[slot];
+  if (hour === undefined) throw new ValidationError("timeOfDay", "must be morning, afternoon or evening");
+  return hour;
+}
+
+/** Server rules (verified live): routines have a blank start_time and exactly one BYHOUR in their rule; other chores must not have BYHOUR. */
+function routineRecurrence(input: Pick<ChoreInput, "timeOfDay" | "startTime" | "recurrence">): Recurrence {
+  if (input.timeOfDay === undefined) throw new ValidationError("routine", "routine steps need timeOfDay: morning, afternoon or evening");
+  if (input.startTime !== undefined) throw new ValidationError("startTime", "routines use timeOfDay, not startTime");
+  return { ...(input.recurrence ?? { frequency: "daily" }), hour: slotHour(input.timeOfDay) };
+}
+
+function plainRecurrence(recurrence: Recurrence): Recurrence {
+  if (recurrence.hour !== undefined) throw new ValidationError("recurrence.hour", "is only for routine steps");
+  return recurrence;
+}
+
 export function buildChoreCreateBody(input: ChoreInput): ChoreCreateBody {
-  const recurrence = input.recurrence === undefined ? null : buildRrule(input.recurrence);
+  let recurrenceInput: Recurrence | undefined = input.recurrence;
+  if (input.routine === true) recurrenceInput = routineRecurrence(input);
+  else if (input.timeOfDay !== undefined) throw new ValidationError("routine", "timeOfDay is only for routine steps");
+  else if (recurrenceInput !== undefined) recurrenceInput = plainRecurrence(recurrenceInput);
+  const recurrence = recurrenceInput === undefined ? null : buildRrule(recurrenceInput);
   return {
     summary: cleanText(input.summary, "summary", 500),
     start: assertDate(input.start, "start"),
@@ -46,7 +71,7 @@ export function buildChoreCreateBody(input: ChoreInput): ChoreCreateBody {
     routine: input.routine ?? false,
     up_for_grabs: input.upForGrabs ?? false,
     recurrence_set: recurrence === null ? null : [recurrence],
-    recurring_until: input.recurrence?.until ?? null,
+    recurring_until: recurrenceInput?.until ?? null,
     category_ids: profileIds(input.profileIds),
     reward_points: input.rewardPoints === undefined ? null : assertPoints(input.rewardPoints, "rewardPoints"),
     emoji_icon: input.emoji === undefined ? null : assertEmoji(input.emoji, "emoji"),
@@ -57,12 +82,21 @@ export function buildChoreUpdateBody(input: Partial<ChoreInput>): Partial<ChoreC
   const out: Partial<ChoreCreateBody> = {};
   if (input.summary !== undefined) out.summary = cleanText(input.summary, "summary", 500);
   if (input.start !== undefined) out.start = assertDate(input.start, "start");
+  // An update cannot see the stored routine flag, so only what is passed is validated.
+  let recurrence: Recurrence | undefined = input.recurrence;
+  if (input.routine === true) recurrence = routineRecurrence(input);
+  else if (input.timeOfDay !== undefined) {
+    if (input.routine === false) throw new ValidationError("routine", "timeOfDay is only for routine steps");
+    if (input.startTime !== undefined) throw new ValidationError("startTime", "routines use timeOfDay, not startTime");
+    if (recurrence === undefined) throw new ValidationError("recurrence", "is required with timeOfDay on update, because the hour is part of the schedule; pass the full recurrence");
+    recurrence = { ...recurrence, hour: slotHour(input.timeOfDay) };
+  } else if (recurrence !== undefined) recurrence = plainRecurrence(recurrence);
   if (input.startTime !== undefined) out.start_time = assertTime(input.startTime, "startTime");
   if (input.routine !== undefined) out.routine = input.routine;
   if (input.upForGrabs !== undefined) out.up_for_grabs = input.upForGrabs;
-  if (input.recurrence !== undefined) {
-    out.recurrence_set = [buildRrule(input.recurrence)];
-    out.recurring_until = input.recurrence.until ?? null;
+  if (recurrence !== undefined) {
+    out.recurrence_set = [buildRrule(recurrence)];
+    out.recurring_until = recurrence.until ?? null;
   }
   if (input.profileIds !== undefined) out.category_ids = profileIds(input.profileIds);
   if (input.rewardPoints !== undefined) out.reward_points = assertPoints(input.rewardPoints, "rewardPoints");
