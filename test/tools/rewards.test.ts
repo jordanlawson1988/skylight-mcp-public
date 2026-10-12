@@ -382,3 +382,15 @@ test("reward tools are annotated: create/update/unredeem/delete/redeem", async (
   assert.match(tools.get("skylight_redeem_reward")!.description ?? "", /confirm: true/);
   await t.close();
 });
+
+test("redeem with confirm refuses locally when the balance is below the cost, with no POST", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES,
+    { method: "GET", path: "/api/frames/77/rewards/9", json: { data: rewardRes("9", { point_value: 40 }) } },
+    { method: "GET", path: "/api/frames/77/reward_points", json: [pts(12, 10)] },
+    { method: "POST", path: "/api/frames/77/rewards/9/redeem", json: {} }]);
+  const r = await t.callTool("skylight_redeem_reward", { rewardId: "9", confirm: true });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /^Invalid input\. rewardId: not enough points: 10 available, 40 needed/);
+  assert.equal(writes(t).length, 0);
+  await t.close();
+});

@@ -182,6 +182,7 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
           message: `Nothing was redeemed. ${spend}${reward.respawnOnRedemption === true ? " A new unredeemed copy will be added afterwards." : ""} Ask the user to confirm, then call again with confirm: true.`,
         };
       }
+      if (short) throw new ValidationError("rewardId", `not enough points: ${points} available, ${cost} needed`);
       let json: unknown;
       try {
         json = await ctx.client.request<unknown>({ method: "POST", path: `${rewardsPath(frameId)}/${id}/redeem` });
