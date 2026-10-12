@@ -111,3 +111,9 @@ test("buildRecipeUpdateBody refuses edits that would destroy free text, or chang
   bad(() => buildRecipeUpdateBody(free, {}), "update");
   bad(() => buildRecipeUpdateBody(free, { description: "d", ingredients: ["a"] }), "description");
 });
+
+test("buildRecipeUpdateBody sends an unchanged title back exactly as stored, even one our own rules would refuse", () => {
+  const odd = "x".repeat(300);
+  assert.equal(buildRecipeUpdateBody({ title: odd, categoryId: "1", description: "d" }, { description: "e" }).summary, odd);
+  bad(() => buildRecipeUpdateBody({ title: odd, categoryId: "1", description: "d" }, { title: odd }), "title");
+});

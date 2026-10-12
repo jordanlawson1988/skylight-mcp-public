@@ -228,6 +228,21 @@ test("delete meal enforces the applyTo rule and finds the meal on that date, in 
   await t.close();
 });
 
+test("a server-side apply_to refusal is turned into guidance on update and delete", async () => {
+  const refusal = { status: 422, text: '{"errors":{"apply_to":["must not provide apply_to with a non-recurring sitting"]}}' };
+  const t = await connectTestClient([FRAMES, CATEGORIES, sittingsFor("1002"), { method: "PATCH", path: /sittings/, ...refusal }, { method: "DELETE", path: /sittings/, ...refusal }]);
+  const update = await t.callTool("skylight_update_meal", { mealId: "1002", date: "2026-10-14", applyTo: "one", note: "x" });
+  assert.equal(update.isError, true);
+  assert.match(update.text, /^Invalid input\. applyTo: Skylight refused this scope/);
+  const del = await t.callTool("skylight_delete_meal", { mealId: "1002", date: "2026-10-14", applyTo: "one", confirm: true });
+  assert.match(del.text, /^Invalid input\. applyTo: Skylight refused this scope/);
+  // an unrelated server error passes through untouched
+  const other = await connectTestClient([FRAMES, CATEGORIES, sittingsFor("1002"), { method: "DELETE", path: /sittings/, status: 500, text: "boom" }]);
+  assert.match((await other.callTool("skylight_delete_meal", { mealId: "1002", date: "2026-10-14", applyTo: "one", confirm: true })).text, /500/);
+  await other.close();
+  await t.close();
+});
+
 test("meal tools are annotated: read, update, create, destroy", async () => {
   const t = await connectTestClient([FRAMES]);
   const tools = new Map((await t.client.listTools()).tools.map((x) => [x.name, x]));

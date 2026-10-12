@@ -60,6 +60,14 @@ function checkScope(sitting: MealSitting, applyTo: string | undefined): void {
   if (!sitting.recurring && applyTo !== undefined) throw new ValidationError("applyTo", "must be omitted: this is a one-time meal");
 }
 
+/** Skylight's own 400/422 about apply_to (the plan changed under us, or its idea of "repeating" differs): say what to do instead of passing the raw text on. */
+function mapScopeError(e: unknown): unknown {
+  if (e instanceof SkylightApiError && (e.status === 400 || e.status === 422) && /apply_to/i.test(e.message)) {
+    return new ValidationError("applyTo", "Skylight refused this scope for the meal (it repeats, or it does not); run skylight_list_meals again and use applyTo only for a meal with recurring: true");
+  }
+  return e;
+}
+
 const mealIdSchema = z.string().describe("Meal id (mealId) from skylight_list_meals.");
 const dateSchema = z.string().describe("The date YYYY-MM-DD of that meal row, as listed by skylight_list_meals.");
 const scopeSchema = z.enum(EXPOSED_MEAL_APPLY_TO_VALUES as [string, ...string[]]).optional()
@@ -181,10 +189,14 @@ export function registerMealTools(server: McpServer, ctx: ToolContext): void {
       const categories = await listMealCategories(ctx, frameId);
       const slot = category === undefined ? undefined : await resolveMealCategory(ctx, frameId, category, categories);
       const body = finish(slot?.id);
-      await ctx.client.request({
-        method: "PATCH", path: `${sittingsPath(frameId)}/${id}/instances/${date}`,
-        query: { date_min: date, date_max: date, include: SITTING_INCLUDE, ...(applyTo !== undefined ? { apply_to: applyTo } : {}) }, body,
-      });
+      try {
+        await ctx.client.request({
+          method: "PATCH", path: `${sittingsPath(frameId)}/${id}/instances/${date}`,
+          query: { date_min: date, date_max: date, include: SITTING_INCLUDE, ...(applyTo !== undefined ? { apply_to: applyTo } : {}) }, body,
+        });
+      } catch (e) {
+        throw mapScopeError(e);
+      }
       try {
         return { updated: true, mealId: id, date, meals: explodeSittings(await readSittings(ctx, frameId, date, date), categories, { after: date, before: date }) };
       } catch (e) {
@@ -222,7 +234,11 @@ export function registerMealTools(server: McpServer, ctx: ToolContext): void {
           message: `Nothing was deleted. This would delete ${scope}: "${title}" on ${formatHuman(date, tz)}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }
-      await ctx.client.request({ method: "DELETE", path: `${sittingsPath(frameId)}/${id}/instances/${date}`, query: args.applyTo === undefined ? {} : { apply_to: args.applyTo } });
+      try {
+        await ctx.client.request({ method: "DELETE", path: `${sittingsPath(frameId)}/${id}/instances/${date}`, query: args.applyTo === undefined ? {} : { apply_to: args.applyTo } });
+      } catch (e) {
+        throw mapScopeError(e);
+      }
       return { deleted: true, mealId: id, date, applyTo: args.applyTo ?? null };
     })
   );

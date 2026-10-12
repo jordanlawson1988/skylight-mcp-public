@@ -189,7 +189,8 @@ export function buildRecipeUpdateBody(existing: { title: string; categoryId: str
   }
   return {
     meal_category_id: assertNumericId(category, "category"),
-    summary: input.title === undefined ? cleanText(existing.title, "title", MAX_RECIPE_TITLE_LENGTH) : cleanText(input.title, "title", MAX_RECIPE_TITLE_LENGTH),
+    // An unchanged title goes back exactly as Skylight has it (it may predate our length and character rules).
+    summary: input.title === undefined ? existing.title : cleanText(input.title, "title", MAX_RECIPE_TITLE_LENGTH),
     description,
   };
 }
