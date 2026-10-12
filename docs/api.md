@@ -55,7 +55,8 @@ Source tags: [bundle] read from the Skylight web app bundle, [live] observed on 
 
 ## Rewards
 
-- `GET /api/frames/{frameId}/rewards`, `GET /api/frames/{frameId}/reward_points`
+- `GET /api/frames/{frameId}/rewards` returns `{ data: [{ id, type: "reward", attributes: { name, emoji_icon, description, point_value, respawn_on_redemption, redeemed_at, origin }, relationships? }] }`. The cost is `point_value`.
+- `GET /api/frames/{frameId}/reward_points` returns a PLAIN ARRAY, not JSON:API: `[{ category_id: number, lifetime_points_earned: number, current_point_balance: number }, ...]`, one entry per category. Labels such as Birthdays are included.
 - `POST /api/frames/{frameId}/reward_points` with `{ category_ids, points }` (negative subtracts).
 
 ## Verified chore semantics
@@ -63,7 +64,8 @@ Source tags: [bundle] read from the Skylight web app bundle, [live] observed on 
 Verified live on 2026-10-12 against app.ourskylight.com.
 
 1. `POST /api/frames/{f}/chores/create_multiple` returns `{ data: [chore...] }`. Our `buildChoreCreateBody` works as-is, including `recurrence_set: ["RRULE:FREQ=DAILY"]` which comes back `recurring: true`.
-2. Chore ids in list responses: the series' first occurrence has the plain numeric id (`"111881467"`); later occurrences of a recurring chore have composite ids `"111881467-2026-10-13"` (`<seriesId>-<YYYY-MM-DD>`). `attributes.series` always holds the numeric series id. `attributes.start` is the series start date.
+2. Chore ids in list responses: the series' first occurrence has the plain numeric id (`"111881467"`); later occurrences of a recurring chore have composite ids `"111881467-2026-10-13"` (`<seriesId>-<YYYY-MM-DD>`). `attributes.series` always holds the numeric series id. `attributes.start` on a list row is the date of that OCCURRENCE (not the series start date).
+   - Routine-step occurrences carry a time suffix: `<series>-<YYYY-MM-DD>-<HHMM>`, e.g. `60913118-2026-10-12-0600`. `attributes.start_time` is `"06:00"`, `"14:00"` or `"20:00"` and the rule carries `BYHOUR=6|14|20`. The completions path still takes the numeric series id, with `instance_date` and `instance_time` in the body.
 3. `PUT /chores/{id}/completions`:
    - `{id}` MUST be the numeric series id. A composite id gives 422 `{"errors":{"id":["is not a number"]}}`.
    - Recurring chore: body `{ status, instance_date }` works. Omitting `instance_date` gives 422 `instance_date can't be blank`.
@@ -76,7 +78,15 @@ Verified live on 2026-10-12 against app.ourskylight.com.
    - Recurring, path numeric series id + `?apply_to=all` deletes the whole series. Series id with no `apply_to` gives 400 `you must have a valid value for apply_to`.
    - Recurring, path composite id `<series>-<date>` + `?apply_to=one` deletes only that occurrence (verified).
    - Recurring, path composite id + `?apply_to=future` deletes that occurrence and all later ones (verified).
+   - For a routine-step occurrence (`<series>-<date>-<HHMM>`) the tool sends the date-only `<series>-<date>` path; whether the time is also needed is checked by the live smoke.
 6. `GET /chores/{id}` returns 404 (no single-chore endpoint). The list is `GET /chores?after=&before=&include_late=true&include_up_for_grabs=true&filter=linked_to_profile`.
+7. Chore attributes also include `description`, `timer_seconds`, `position`, `completed_at`, `completed_on` and `up_for_grabs`.
+8. Routines (`routine: true`) on create:
+   - `start_time` MUST be blank (422 `start_time must be blank`).
+   - `recurrence_set` MUST be present (422 `cannot be empty for routines`) and MUST contain exactly one `BYHOUR` of 6, 14 or 20 (422 otherwise, including `BYHOUR=7`). The server derives each occurrence's `start_time` from it.
+   - Non-routine chores MUST NOT have `BYHOUR` (422 `BYHOUR not allowed for non-routine chores`).
+   - The tools expose this as `timeOfDay` (`morning` = 6, `afternoon` = 14, `evening` = 20; `ROUTINE_SLOTS` in `vocab.ts`).
+9. Up-for-grabs chores: `category_ids: []` and `start: null` are both accepted. `relationships.category.data` is null; a claimed or finished one has `relationships.completed_category.data.id`. The list returns them only when `include_up_for_grabs=true`, with or without `filter=linked_to_profile`.
 
 ## Login verification
 

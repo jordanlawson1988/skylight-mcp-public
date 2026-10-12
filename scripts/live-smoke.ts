@@ -1,12 +1,13 @@
 // Opt-in live checks against the real Skylight API using the stored credential.
-// Read-only by default. SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), then a profile (create, update, assign a chore, delete, verify gone).
+// Read-only by default (also fails if balances or reward costs map to nothing). SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), recurrence variants, a morning routine step (BYHOUR, time-suffixed ids), an up-for-grabs chore, clearing fields with null, then a profile (create, update, assign a chore, delete, verify gone).
 import { createRuntime, assertMacOS, type Runtime } from "../src/runtime.js";
 import { listProfiles } from "../src/tools/profiles.js";
 import { mapChore, mapChores, mapProfile, mapProfiles, mapRewardPoints, mapRewards } from "../src/skylight/types.js";
-import { buildChoreCreateBody } from "../src/skylight/chore-payload.js";
+import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput } from "../src/skylight/chore-payload.js";
 import { buildProfileCreateBody, buildProfileUpdateBody } from "../src/skylight/profile-payload.js";
 import { localDateString } from "../src/skylight/ids.js";
-import { CHORE_STATUS } from "../src/skylight/vocab.js";
+import { CHORE_STATUS, ROUTINE_SLOTS } from "../src/skylight/vocab.js";
+import { deletePathId, planCompletion } from "../src/tools/chores.js";
 
 async function main() {
   assertMacOS();
@@ -54,13 +55,14 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
   const list = async (after: string, before: string, includeLate = false) =>
     mapChores(await rt.client.request({ method: "GET", path: base, query: { after, before, include_late: includeLate, include_up_for_grabs: true, filter: "linked_to_profile" } }))
       .filter((c) => c.summary.startsWith(PREFIX));
-  const create = async (summary: string, extra: Partial<Parameters<typeof buildChoreCreateBody>[0]> = {}) => {
-    const json = await rt.client.request<unknown>({ method: "POST", path: `${base}/create_multiple`, body: buildChoreCreateBody({ summary, start: today, profileIds: [profileId], ...extra }) });
+  const createFrom = async (input: ChoreInput) => {
+    const json = await rt.client.request<unknown>({ method: "POST", path: `${base}/create_multiple`, body: buildChoreCreateBody(input) });
     const created = mapChores(json);
     const chore = created[0] ?? mapChore((json as { data?: unknown } | null)?.data);
     if (!chore) throw new Error("create returned no chore; inspect response shape");
     return chore;
   };
+  const create = (summary: string, extra: Partial<ChoreInput> = {}) => createFrom({ summary, start: today, profileIds: [profileId], ...extra });
 
   // Series ids we still need to clean up: id -> whether the chore is recurring.
   const live = new Map<string, boolean>();
@@ -124,6 +126,73 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
     const gone = await list(today, addDays(today, 3));
     if (gone.some((c) => c.summary.includes(stamp))) throw new Error("smoke chores still listed after apply_to=all");
     step("list shows none of the smoke chores");
+
+    // Recurrence variants: create each, assert the server echoes the expected rule tokens, delete the whole series.
+    const until = addDays(today, 10);
+    const variants: Array<{ name: string; recurrence: NonNullable<ChoreInput["recurrence"]>; tokens: string[] }> = [
+      { name: "weekly MO,WE", recurrence: { frequency: "weekly", weekdays: ["MO", "WE"] }, tokens: ["FREQ=WEEKLY", "BYDAY=MO,WE"] },
+      { name: "monthly on the 15th", recurrence: { frequency: "monthly", monthDay: 15 }, tokens: ["FREQ=MONTHLY", "BYMONTHDAY=15"] },
+      { name: "every 2 days", recurrence: { frequency: "daily", interval: 2 }, tokens: ["FREQ=DAILY", "INTERVAL=2"] },
+      { name: "daily until +10d", recurrence: { frequency: "daily", until }, tokens: ["FREQ=DAILY", `UNTIL=${until.replaceAll("-", "")}`] },
+    ];
+    for (const v of variants) {
+      const made = await create(`${PREFIX} ${v.name} ${stamp}`, { recurrence: v.recurrence });
+      live.set(made.seriesId, true);
+      const rule = made.recurrenceRule ?? "";
+      const missing = v.tokens.filter((t) => !rule.includes(t));
+      if (missing.length > 0) throw new Error(`${v.name}: returned rule "${rule}" lacks ${missing.join(", ")}`);
+      await rt.client.request({ method: "DELETE", path: `${base}/${made.seriesId}`, query: { apply_to: "all" } });
+      live.delete(made.seriesId);
+      step(`recurrence ${v.name} created with ${v.tokens.join(" + ")} and deleted`);
+    }
+
+    // Routine step (morning): BYHOUR=6, time-suffixed occurrence ids, complete/revert with instance_time, delete one occurrence by the date-only path.
+    const routine = await create(`${PREFIX} routine ${stamp}`, { routine: true, timeOfDay: "morning" });
+    live.set(routine.seriesId, true);
+    if (!(routine.recurrenceRule ?? "").includes(`BYHOUR=${ROUTINE_SLOTS.morning}`)) throw new Error(`routine rule lacks BYHOUR=6: ${routine.recurrenceRule}`);
+    step(`routine created ${routine.seriesId} (${routine.recurrenceRule})`);
+    const routineWindow = await list(today, addDays(today, 3));
+    console.log("routine ids in window:", routineWindow.map((c) => c.id).join(", "));
+    const todays = routineWindow.find((c) => c.seriesId === routine.seriesId && c.id.endsWith("-0600") && c.instanceDate === today);
+    if (!todays) throw new Error("no -0600 occurrence listed for the routine step today");
+    if (todays.timeOfDay !== "morning") throw new Error(`routine occurrence timeOfDay=${String(todays.timeOfDay)}`);
+    step("routine occurrence id ends with -0600");
+    for (const done of [true, false]) {
+      const plan = planCompletion({ choreId: todays.id, done });
+      if (plan.body.instance_time !== "06:00") throw new Error(`completion body lacks instance_time: ${JSON.stringify(plan.body)}`);
+      await rt.client.request({ method: "PUT", path: `${base}/${plan.seriesId}/completions`, body: plan.body });
+    }
+    step("routine occurrence completed and reverted with instance_time");
+    const tomorrowRoutine = routineWindow.find((c) => c.seriesId === routine.seriesId && c.instanceDate === addDays(today, 1));
+    if (!tomorrowRoutine) throw new Error("tomorrow's routine occurrence not listed");
+    const del = deletePathId(tomorrowRoutine.id, "one");
+    await rt.client.request({ method: "DELETE", path: `${base}/${del.pathId}`, query: { apply_to: "one" } });
+    const afterRoutine = await list(today, addDays(today, 3));
+    if (afterRoutine.some((c) => c.id === tomorrowRoutine.id)) throw new Error(`routine occurrence ${tomorrowRoutine.id} still listed after apply_to=one on ${del.pathId}`);
+    if (!afterRoutine.some((c) => c.seriesId === routine.seriesId)) throw new Error("whole routine series vanished after apply_to=one");
+    step(`routine occurrence deleted via date-only path ${del.pathId}`);
+    await rt.client.request({ method: "DELETE", path: `${base}/${routine.seriesId}`, query: { apply_to: "all" } });
+    live.delete(routine.seriesId);
+    step("routine series deleted");
+
+    // Up-for-grabs, unassigned, no start date.
+    const grabs = await createFrom({ summary: `${PREFIX} grabs ${stamp}`, upForGrabs: true });
+    live.set(grabs.seriesId, false);
+    if (!grabs.upForGrabs) throw new Error("up-for-grabs chore came back with up_for_grabs=false");
+    if (grabs.profileIds.length > 0) throw new Error(`up-for-grabs chore has a category: ${grabs.profileIds.join(",")}`);
+    await rt.client.request({ method: "DELETE", path: `${base}/${grabs.seriesId}` });
+    live.delete(grabs.seriesId);
+    step("up-for-grabs chore created unassigned with no start, then deleted");
+
+    // Clearing fields on update.
+    const clearable = await create(`${PREFIX} clear ${stamp}`, { emoji: "🧹", rewardPoints: 3 });
+    live.set(clearable.seriesId, false);
+    if (clearable.emoji === null || clearable.rewardPoints !== 3) throw new Error(`create did not keep emoji/points: ${JSON.stringify([clearable.emoji, clearable.rewardPoints])}`);
+    const cleared = mapChore(((await rt.client.request<unknown>({ method: "PUT", path: `${base}/${clearable.seriesId}`, body: buildChoreUpdateBody({ emoji: null, rewardPoints: null }) })) as { data?: unknown } | null)?.data);
+    if (!cleared || cleared.emoji !== null || cleared.rewardPoints !== null) throw new Error(`update with nulls did not clear: ${JSON.stringify(cleared && [cleared.emoji, cleared.rewardPoints])}`);
+    await rt.client.request({ method: "DELETE", path: `${base}/${clearable.seriesId}` });
+    live.delete(clearable.seriesId);
+    step("update with null cleared emoji and rewardPoints");
 
     // Profile: create, update, assign a one-time chore, delete without reassign, verify gone.
     const created = mapProfile(((await rt.client.request<unknown>({ method: "POST", path: catBase, body: buildProfileCreateBody({ name: `${PREFIX} ${stamp}`, color: "#123456", kind: "profile" }) })) as { data?: unknown } | null)?.data);

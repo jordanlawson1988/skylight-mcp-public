@@ -108,6 +108,33 @@ function mapCompletionError(e: unknown): unknown {
   return e;
 }
 
+/** Request pieces for completing (or reverting) a chore occurrence from a listed id. Shared by the tool and the live smoke. */
+export function planCompletion(args: { choreId: string; instanceDate?: string | undefined; instanceTime?: string | undefined; profileId?: string | undefined; done?: boolean | undefined }): { seriesId: string; instanceDate: string | null; status: string; body: Record<string, unknown> } {
+  const ref = parseChoreId(args.choreId, "choreId");
+  const instanceDate = resolveInstanceDate(ref.instanceDate, args.instanceDate);
+  const profileId = args.profileId === undefined ? null : assertId(args.profileId, "profileId");
+  const instanceTime = resolveInstanceTime(ref.instanceTime, args.instanceTime);
+  const status = args.done === false ? CHORE_STATUS.notDone : CHORE_STATUS.done;
+  const body: Record<string, unknown> = {
+    status,
+    ...(instanceDate !== null ? { instance_date: instanceDate } : {}),
+    ...(instanceTime !== null ? { instance_time: instanceTime } : {}),
+    ...(profileId !== null ? { category_id: profileId } : {}),
+  };
+  return { seriesId: ref.seriesId, instanceDate, status, body };
+}
+
+/** The id segment for DELETE: the numeric series id, or `<series>-<date>` (date only, even for routine steps) when applyTo is "one" or "future". */
+export function deletePathId(choreId: string, applyTo: string | undefined, instanceDate?: string | undefined): { pathId: string; seriesId: string; instanceDate: string | null; anchored: boolean } {
+  const ref = parseChoreId(choreId, "choreId");
+  const date = resolveInstanceDate(ref.instanceDate, instanceDate);
+  const anchored = applyTo === "one" || applyTo === "future";
+  if (anchored && date === null) {
+    throw new ValidationError("instanceDate", `applyTo "${applyTo}" needs the occurrence date: pass a composite choreId (seriesId-YYYY-MM-DD) or instanceDate`);
+  }
+  return { pathId: anchored ? `${ref.seriesId}-${date}` : ref.seriesId, seriesId: ref.seriesId, instanceDate: date, anchored };
+}
+
 const DELETE_SCOPE_TEXT = {
   all: "every occurrence of this recurring chore",
   future: "this occurrence and all later ones",
@@ -266,24 +293,18 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     },
     (args) => run(async () => {
       const { choreId, confirm, applyTo, instanceDate } = args as { choreId: string; confirm?: boolean; applyTo?: string; instanceDate?: string };
-      const ref = parseChoreId(choreId, "choreId");
-      const date = resolveInstanceDate(ref.instanceDate, instanceDate);
-      const anchored = applyTo === "one" || applyTo === "future";
-      if (anchored && date === null) {
-        throw new ValidationError("instanceDate", `applyTo "${applyTo}" needs the occurrence date: pass a composite choreId (seriesId-YYYY-MM-DD) or instanceDate`);
-      }
-      const path = anchored ? `${ref.seriesId}-${date}` : ref.seriesId;
+      const { pathId: path, seriesId, instanceDate: date, anchored } = deletePathId(choreId, applyTo, instanceDate);
       const frameId = await ctx.frames.resolve();
       if (confirm !== true) {
         const scope = DELETE_SCOPE_TEXT[(applyTo as keyof typeof DELETE_SCOPE_TEXT | undefined) ?? "none"];
         return {
           confirmed: false,
-          wouldDelete: { seriesId: ref.seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null, summary: await findChoreSummary(ctx, frameId, choreId, ref.seriesId, date) },
+          wouldDelete: { seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null, summary: await findChoreSummary(ctx, frameId, choreId, seriesId, date) },
           message: `Nothing was deleted. This would delete ${scope}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }
       await ctx.client.request({ method: "DELETE", path: `${choresPath(frameId)}/${path}`, query: applyTo === undefined ? {} : { apply_to: applyTo } });
-      return { deleted: true, seriesId: ref.seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null };
+      return { deleted: true, seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null };
     })
   );
 
@@ -302,25 +323,15 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       annotations: ANNOTATIONS.update,
     },
     (args) => run(async () => {
-      const ref = parseChoreId(args.choreId, "choreId");
-      const instanceDate = resolveInstanceDate(ref.instanceDate, args.instanceDate);
-      const profileId = args.profileId === undefined ? null : assertId(args.profileId, "profileId");
-      const instanceTime = resolveInstanceTime(ref.instanceTime, args.instanceTime);
-      const status = args.done === false ? CHORE_STATUS.notDone : CHORE_STATUS.done;
+      const { seriesId, instanceDate, status, body } = planCompletion(args);
       const frameId = await ctx.frames.resolve();
-      const body: Record<string, unknown> = {
-        status,
-        ...(instanceDate !== null ? { instance_date: instanceDate } : {}),
-        ...(instanceTime !== null ? { instance_time: instanceTime } : {}),
-        ...(profileId !== null ? { category_id: profileId } : {}),
-      };
       let json: unknown;
       try {
-        json = await ctx.client.request<unknown>({ method: "PUT", path: `${choresPath(frameId)}/${ref.seriesId}/completions`, body });
+        json = await ctx.client.request<unknown>({ method: "PUT", path: `${choresPath(frameId)}/${seriesId}/completions`, body });
       } catch (e) {
         throw mapCompletionError(e);
       }
-      return { seriesId: ref.seriesId, instanceDate, status, chore: mapChore((json as { data?: unknown })?.data) };
+      return { seriesId, instanceDate, status, chore: mapChore((json as { data?: unknown })?.data) };
     })
   );
 }
