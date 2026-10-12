@@ -36,6 +36,10 @@ export async function findCallbackInChromeHistory(o: ChromeHistoryOptions): Prom
       work = await mkdtemp(path.join(o.tmpDir ?? os.tmpdir(), "skylight-mcp-history-"));
       const copy = path.join(work, "History");
       await copyFile(source, copy);
+      // A rollback journal or WAL next to History may hold in-flight data; copy it alongside (best effort).
+      for (const suffix of ["-journal", "-wal"]) {
+        try { await copyFile(`${source}${suffix}`, `${copy}${suffix}`); } catch { /* absent or unreadable: ignore */ }
+      }
       const { stdout } = await execFileAsync(sqlite3, ["-readonly", copy, sql], { timeout: 10_000, maxBuffer: 1024 * 1024 });
       const line = stdout.trim();
       const bar = line.indexOf("|");

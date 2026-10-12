@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, readdir } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { findCallbackInChromeHistory } from "../../src/cli/chrome-history.js";
@@ -60,4 +60,25 @@ test("returns null for a missing Chrome dir, a missing sqlite3, or a corrupt His
   assert.deepEqual(await readdir(tmp.dir), []);
   await chrome.cleanup();
   await tmp.cleanup();
+});
+
+test("copies into a private 0700 temp dir, copies History-journal/-wal alongside, and removes everything", async () => {
+  const chrome = await makeTmpDir();
+  const tmp = await makeTmpDir();
+  const shimDir = await makeTmpDir();
+  await makeHistory(chrome.dir, "Default", [["https://ourskylight.com/welcome?code=NEW&state=s", NOW + 1000]]);
+  // Empty sidecars are valid (sqlite ignores a zero-length journal/WAL) and let us see they were copied.
+  await writeFile(path.join(chrome.dir, "Default", "History-journal"), "");
+  await writeFile(path.join(chrome.dir, "Default", "History-wal"), "");
+  const log = path.join(shimDir.dir, "log.txt");
+  const shim = path.join(shimDir.dir, "sqlite3-shim");
+  await writeFile(shim, `#!/bin/sh\ndir=$(dirname "$2")\n{ stat -f %Lp "$dir"; ls "$dir"; } > '${log}'\nexec /usr/bin/sqlite3 "$@"\n`);
+  await chmod(shim, 0o755);
+  const url = await findCallbackInChromeHistory({ chromeDir: chrome.dir, since: NOW, tmpDir: tmp.dir, sqlite3Path: shim });
+  assert.equal(url, "https://ourskylight.com/welcome?code=NEW&state=s");
+  const [mode, ...files] = (await readFile(log, "utf8")).trim().split("\n");
+  assert.equal(mode, "700");
+  assert.deepEqual(files.sort(), ["History", "History-journal", "History-wal"]);
+  assert.deepEqual(await readdir(tmp.dir), []);
+  await Promise.all([chrome.cleanup(), tmp.cleanup(), shimDir.cleanup()]);
 });
