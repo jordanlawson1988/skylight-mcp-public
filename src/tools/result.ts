@@ -5,6 +5,7 @@ export const ANNOTATIONS = {
   read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   create: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   update: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  mutate: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   destroy: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 } as const;
 

@@ -4,6 +4,7 @@ import { createRuntime, assertMacOS } from "../src/runtime.js";
 import { listProfiles } from "../src/tools/profiles.js";
 import { mapChore, mapChores, mapRewardPoints } from "../src/skylight/types.js";
 import { buildChoreCreateBody } from "../src/skylight/chore-payload.js";
+import { localDateString } from "../src/skylight/ids.js";
 import { CHORE_STATUS } from "../src/skylight/vocab.js";
 
 async function main() {
@@ -13,7 +14,7 @@ async function main() {
   console.log("frame", frameId);
   const profiles = await listProfiles(rt);
   console.log("profiles", profiles.map((p) => `${p.name}:${p.id}`).join(", "));
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateString();
   const chores = mapChores(await rt.client.request({ method: "GET", path: `/api/frames/${frameId}/chores`, query: { after: today, before: today, include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" } }));
   console.log("chores today", chores.length);
   console.log("points", mapRewardPoints(await rt.client.request({ method: "GET", path: `/api/frames/${frameId}/reward_points` })));

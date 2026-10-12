@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput } from "../skylight/chore-payload.js";
 import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors.js";
-import { assertDate, assertId, assertTime } from "../skylight/ids.js";
+import { assertDate, assertId, assertTime, localDateString } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
 import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES } from "../skylight/vocab.js";
@@ -58,9 +58,9 @@ function stopReason(e: unknown): string | null {
 
 async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: string): Promise<string | null> {
   const today = new Date();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const after = new Date(today); after.setUTCDate(after.getUTCDate() - 365);
-  const before = new Date(today); before.setUTCDate(before.getUTCDate() + 365);
+  const iso = localDateString;
+  const after = new Date(today); after.setDate(after.getDate() - 365);
+  const before = new Date(today); before.setDate(before.getDate() + 365);
   try {
     const chores = mapChores(await ctx.client.request({ method: "GET", path: choresPath(frameId), query: { after: iso(after), before: iso(before), include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" } }));
     return chores.find((c) => c.id === choreId)?.summary ?? null;
@@ -84,7 +84,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       annotations: ANNOTATIONS.read,
     },
     (args) => run(async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localDateString();
       const after = assertDate(args.after ?? today, "after");
       const before = assertDate(args.before ?? new Date(Date.parse(`${after}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10), "before");
       if (after > before) throw new ValidationError("after", "must not be later than before");
