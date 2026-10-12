@@ -2,7 +2,7 @@
 // Read-only by default. SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), then a profile (create, update, assign a chore, delete, verify gone).
 import { createRuntime, assertMacOS, type Runtime } from "../src/runtime.js";
 import { listProfiles } from "../src/tools/profiles.js";
-import { mapChore, mapChores, mapProfile, mapProfiles, mapRewardPoints } from "../src/skylight/types.js";
+import { mapChore, mapChores, mapProfile, mapProfiles, mapRewardPoints, mapRewards } from "../src/skylight/types.js";
 import { buildChoreCreateBody } from "../src/skylight/chore-payload.js";
 import { buildProfileCreateBody, buildProfileUpdateBody } from "../src/skylight/profile-payload.js";
 import { localDateString } from "../src/skylight/ids.js";
@@ -18,7 +18,21 @@ async function main() {
   const today = localDateString();
   const chores = mapChores(await rt.client.request({ method: "GET", path: `/api/frames/${frameId}/chores`, query: { after: today, before: today, include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" } }));
   console.log("chores today", chores.length);
-  console.log("points", mapRewardPoints(await rt.client.request({ method: "GET", path: `/api/frames/${frameId}/reward_points` })));
+  const rawPoints = await rt.client.request<unknown>({ method: "GET", path: `/api/frames/${frameId}/reward_points` });
+  const points = mapRewardPoints(rawPoints);
+  console.log("points", points);
+  const rawPointRows = Array.isArray(rawPoints) ? rawPoints : (rawPoints as { data?: unknown } | null)?.data;
+  if (Array.isArray(rawPointRows) && rawPointRows.length > 0 && points.length === 0) throw new Error("reward_points is non-empty but the mapper returned zero balances; the response shape changed");
+  const rawRewards = await rt.client.request<unknown>({ method: "GET", path: `/api/frames/${frameId}/rewards` });
+  const rewards = mapRewards(rawRewards);
+  console.log("rewards", rewards.map((r) => `${r.title}:${String(r.cost)}`).join(", "));
+  const rawRewardRows = (rawRewards as { data?: Array<{ id?: unknown; attributes?: { point_value?: unknown } }> } | null)?.data ?? [];
+  for (const raw of rawRewardRows) {
+    const pv = raw.attributes?.point_value;
+    if (typeof pv !== "number") continue;
+    const mapped = rewards.find((r) => r.id === String(raw.id));
+    if (!mapped || mapped.cost !== pv) throw new Error(`reward ${String(raw.id)} has point_value ${pv} but the mapper returned cost ${String(mapped?.cost)}`);
+  }
   if (process.env.SKYLIGHT_LIVE_WRITE !== "1") { console.log("read-only smoke OK (set SKYLIGHT_LIVE_WRITE=1 for write checks)"); return; }
   const profile = profiles.find((p) => p.name === "Jordan") ?? profiles[0];
   if (!profile) throw new Error("no profile to assign to");

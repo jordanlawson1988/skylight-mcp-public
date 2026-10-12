@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mapProfile, mapProfiles, mapChores, mapRewardPoints, mapRewards } from "../../src/skylight/types.js";
+
+const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url), "utf8"));
 
 test("mapProfiles reads JSON:API categories", () => {
   const out = mapProfiles({ data: [
@@ -65,9 +68,31 @@ test("mappers tolerate missing data and skip malformed items", () => {
   assert.deepEqual(mapProfiles({ data: [{ attributes: {} }] }), []);
 });
 
-test("mapRewardPoints and mapRewards", () => {
-  assert.deepEqual(mapRewardPoints({ data: [{ id: "1", attributes: { category_id: 12, points: 40 } }, { id: "2", attributes: { category_id: "13", points: "7" } }] }),
-    [{ profileId: "12", points: 40 }, { profileId: "13", points: 7 }]);
-  assert.deepEqual(mapRewards({ data: [{ id: "5", attributes: { title: "Ice cream", reward_points: 50, emoji_icon: "🍦", redeemed_at: null }, relationships: { categories: { data: [{ id: "12" }] } } }] }),
-    [{ id: "5", title: "Ice cream", cost: 50, emoji: "🍦", redeemedAt: null, profileIds: ["12"] }]);
+test("mapRewardPoints parses the live plain-array shape", () => {
+  const out = mapRewardPoints(fixture("reward_points"));
+  assert.equal(out.length, 7);
+  assert.deepEqual(out[1], { profileId: "15057970", points: 16, lifetimePoints: 56 });
+  assert.deepEqual(out[0], { profileId: "16758450", points: 0, lifetimePoints: 0 });
+});
+
+test("mapRewardPoints accepts string ids, a data wrapper, missing lifetime, and skips junk", () => {
+  assert.deepEqual(mapRewardPoints([{ category_id: "13", current_point_balance: 7 }]), [{ profileId: "13", points: 7, lifetimePoints: null }]);
+  assert.deepEqual(mapRewardPoints({ data: [{ category_id: 12, current_point_balance: 4, lifetime_points_earned: 9 }] }), [{ profileId: "12", points: 4, lifetimePoints: 9 }]);
+  assert.deepEqual(mapRewardPoints([{ category_id: 12 }, { current_point_balance: 3 }, null, "x"]), []);
+  assert.deepEqual(mapRewardPoints(null), []);
+  assert.deepEqual(mapRewardPoints({}), []);
+});
+
+test("mapRewards reads name, point_value and the other live attributes", () => {
+  const out = mapRewards(fixture("rewards"));
+  assert.deepEqual(out, [
+    { id: "7323341", title: "Reward 1", cost: 400, emoji: null, description: null, respawnOnRedemption: true, redeemedAt: null, profileIds: ["15057920"] },
+    { id: "7323221", title: "Reward 2", cost: 250, emoji: null, description: null, respawnOnRedemption: true, redeemedAt: null, profileIds: ["15057970"] },
+  ]);
+  const one = mapRewards({ data: [{ id: "5", attributes: { name: "Ice cream", point_value: 0, emoji_icon: "🍦", description: "Treat", respawn_on_redemption: false, redeemed_at: "2026-10-01T10:00:00Z" } }] })[0]!;
+  assert.equal(one.cost, 0);
+  assert.equal(one.emoji, "🍦");
+  assert.equal(one.respawnOnRedemption, false);
+  assert.equal(one.redeemedAt, "2026-10-01T10:00:00Z");
+  assert.equal(mapRewards({ data: [{ id: "6", attributes: { name: "No cost" } }] })[0]!.cost, null);
 });

@@ -10,8 +10,11 @@ export interface Chore {
   /** Occurrence date of a recurring chore: the date in a composite id, else attributes.start. Null for one-time chores. */
   instanceDate: string | null;
 }
-export interface RewardPoints { profileId: string; points: number }
-export interface Reward { id: string; title: string; cost: number | null; emoji: string | null; redeemedAt: string | null; profileIds: string[] }
+export interface RewardPoints { profileId: string; points: number; lifetimePoints: number | null }
+export interface Reward {
+  id: string; title: string; cost: number | null; emoji: string | null; description: string | null;
+  respawnOnRedemption: boolean | null; redeemedAt: string | null; profileIds: string[];
+}
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec => (v && typeof v === "object" && !Array.isArray(v) ? (v as Rec) : {});
@@ -81,13 +84,16 @@ export function mapChores(json: unknown): Chore[] {
   return dataArray(json).map(mapChore).filter((c): c is Chore => c !== null);
 }
 
+/** GET /reward_points returns a plain array (one row per category, labels included); a `{ data: [...] }` wrapper is tolerated. */
 export function mapRewardPoints(json: unknown): RewardPoints[] {
+  const top = rec(json);
+  const rows = Array.isArray(json) ? json : Array.isArray(top.data) ? top.data : [];
   const out: RewardPoints[] = [];
-  for (const r of dataArray(json)) {
-    const a = rec(r.attributes);
-    const profileId = idOf(a.category_id) ?? relationshipIds(r)[0] ?? null;
-    const points = num(a.points);
-    if (profileId && points !== null) out.push({ profileId, points });
+  for (const row of rows) {
+    const r = rec(row);
+    const profileId = idOf(r.category_id);
+    const points = num(r.current_point_balance);
+    if (profileId && points !== null) out.push({ profileId, points, lifetimePoints: num(r.lifetime_points_earned) });
   }
   return out;
 }
@@ -97,9 +103,12 @@ export function mapRewards(json: unknown): Reward[] {
   for (const r of dataArray(json)) {
     const id = idOf(r.id);
     const a = rec(r.attributes);
-    const title = str(a.title) ?? str(a.summary) ?? str(a.name);
+    const title = str(a.name);
     if (!id || !title) continue;
-    out.push({ id, title, cost: num(a.reward_points) ?? num(a.points) ?? num(a.cost), emoji: str(a.emoji_icon), redeemedAt: str(a.redeemed_at), profileIds: relationshipIds(r) });
+    out.push({
+      id, title, cost: num(a.point_value), emoji: str(a.emoji_icon), description: str(a.description),
+      respawnOnRedemption: bool(a.respawn_on_redemption), redeemedAt: str(a.redeemed_at), profileIds: relationshipIds(r),
+    });
   }
   return out;
 }

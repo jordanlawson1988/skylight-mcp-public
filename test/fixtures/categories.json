@@ -1,0 +1,363 @@
+{
+  "data": [
+    {
+      "id": "16758450",
+      "type": "category_detail",
+      "attributes": {
+        "id": 16758450,
+        "color": "#FBA994",
+        "label": "Anniversaries",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true,
+        "profile_picture_urls": {
+          "original": null,
+          "xl": null,
+          "large": null,
+          "medium": null,
+          "small": null
+        }
+      },
+      "relationships": {
+        "family_member": {
+          "data": null
+        },
+        "source_calendars": {
+          "data": []
+        },
+        "source_calendar_categorizations": {
+          "data": []
+        },
+        "avatar": {
+          "data": null
+        },
+        "hat": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "15057970",
+      "type": "category_detail",
+      "attributes": {
+        "id": 15057970,
+        "color": "#fc86bc",
+        "label": "Kid C",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true,
+        "profile_picture_urls": {
+          "original": "https://example.invalid/pic.png",
+          "xl": "https://example.invalid/pic.png",
+          "large": "https://example.invalid/pic.png",
+          "medium": "https://example.invalid/pic.png",
+          "small": "https://example.invalid/pic.png"
+        }
+      },
+      "relationships": {
+        "family_member": {
+          "data": {
+            "id": "1460865",
+            "type": "family_member"
+          }
+        },
+        "source_calendars": {
+          "data": [
+            {
+              "id": "5097659",
+              "type": "source_calendar"
+            }
+          ]
+        },
+        "source_calendar_categorizations": {
+          "data": [
+            {
+              "id": "8931318",
+              "type": "source_calendar_categorization"
+            }
+          ]
+        },
+        "avatar": {
+          "data": null
+        },
+        "hat": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "15057920",
+      "type": "category_detail",
+      "attributes": {
+        "id": 15057920,
+        "color": "#93D1E6",
+        "label": "Kid B",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true,
+        "profile_picture_urls": {
+          "original": null,
+          "xl": null,
+          "large": null,
+          "medium": null,
+          "small": null
+        }
+      },
+      "relationships": {
+        "family_member": {
+          "data": {
+            "id": "1460866",
+            "type": "family_member"
+          }
+        },
+        "source_calendars": {
+          "data": [
+            {
+              "id": "5097659",
+              "type": "source_calendar"
+            }
+          ]
+        },
+        "source_calendar_categorizations": {
+          "data": [
+            {
+              "id": "8931354",
+              "type": "source_calendar_categorization"
+            }
+          ]
+        },
+        "avatar": {
+          "data": null
+        },
+        "hat": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "14515614",
+      "type": "category_detail",
+      "attributes": {
+        "id": 14515614,
+        "color": "#CB434C",
+        "label": "Parent A",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true,
+        "profile_picture_urls": {
+          "original": null,
+          "xl": null,
+          "large": null,
+          "medium": null,
+          "small": null
+        }
+      },
+      "relationships": {
+        "family_member": {
+          "data": {
+            "id": "978679",
+            "type": "family_member"
+          }
+        },
+        "source_calendars": {
+          "data": [
+            {
+              "id": "7534261",
+              "type": "source_calendar"
+            }
+          ]
+        },
+        "source_calendar_categorizations": {
+          "data": [
+            {
+              "id": "14648010",
+              "type": "source_calendar_categorization"
+            }
+          ]
+        },
+        "avatar": {
+          "data": null
+        },
+        "hat": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "15057870",
+      "type": "category_detail",
+      "attributes": {
+        "id": 15057870,
+        "color": "#2178AF",
+        "label": "Kid A",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true,
+        "profile_picture_urls": {
+          "original": null,
+          "xl": null,
+          "large": null,
+          "medium": null,
+          "small": null
+        }
+      },
+      "relationships": {
+        "family_member": {
+          "data": {
+            "id": "978769",
+            "type": "family_member"
+          }
+        },
+        "source_calendars": {
+          "data": []
+        },
+        "source_calendar_categorizations": {
+          "data": []
+        },
+        "avatar": {
+          "data": null
+        },
+        "hat": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "15212509",
+      "type": "category_detail",
+      "attributes": {
+        "id": 15212509,
+        "color": "#CF632E",
+        "label": "Birthdays",
+        "selected_for_chore_chart": false,
+        "linked_to_profile": false,
+        "profile_picture_urls": {
+          "original": null,
+          "xl": null,
+          "large": null,
+          "medium": null,
+          "small": null
+        }
+      },
+      "relationships": {
+        "family_member": {
+          "data": null
+        },
+        "source_calendars": {
+          "data": [
+            {
+              "id": "5377138",
+              "type": "source_calendar"
+            },
+            {
+              "id": "7534261",
+              "type": "source_calendar"
+            },
+            {
+              "id": "7534261",
+              "type": "source_calendar"
+            },
+            {
+              "id": "7534261",
+              "type": "source_calendar"
+            },
+            {
+              "id": "7534261",
+              "type": "source_calendar"
+            },
+            {
+              "id": "7534261",
+              "type": "source_calendar"
+            },
+            {
+              "id": "7534261",
+              "type": "source_calendar"
+            }
+          ]
+        },
+        "source_calendar_categorizations": {
+          "data": [
+            {
+              "id": "9045430",
+              "type": "source_calendar_categorization"
+            },
+            {
+              "id": "14648014",
+              "type": "source_calendar_categorization"
+            },
+            {
+              "id": "14648017",
+              "type": "source_calendar_categorization"
+            },
+            {
+              "id": "14648019",
+              "type": "source_calendar_categorization"
+            },
+            {
+              "id": "14648015",
+              "type": "source_calendar_categorization"
+            },
+            {
+              "id": "14648018",
+              "type": "source_calendar_categorization"
+            },
+            {
+              "id": "14648016",
+              "type": "source_calendar_categorization"
+            }
+          ]
+        },
+        "avatar": {
+          "data": null
+        },
+        "hat": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "14515613",
+      "type": "category_detail",
+      "attributes": {
+        "id": 14515613,
+        "color": "#d5b6ec",
+        "label": "Parent B",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true,
+        "profile_picture_urls": {
+          "original": null,
+          "xl": null,
+          "large": null,
+          "medium": null,
+          "small": null
+        }
+      },
+      "relationships": {
+        "family_member": {
+          "data": {
+            "id": "1460864",
+            "type": "family_member"
+          }
+        },
+        "source_calendars": {
+          "data": [
+            {
+              "id": "5097659",
+              "type": "source_calendar"
+            }
+          ]
+        },
+        "source_calendar_categorizations": {
+          "data": [
+            {
+              "id": "8549954",
+              "type": "source_calendar_categorization"
+            }
+          ]
+        },
+        "avatar": {
+          "data": null
+        },
+        "hat": {
+          "data": null
+        }
+      }
+    }
+  ],
+  "included": []
+}

@@ -1,0 +1,54 @@
+{
+  "data": [
+    {
+      "id": "7323341",
+      "type": "reward",
+      "attributes": {
+        "name": "Reward 1",
+        "emoji_icon": null,
+        "description": null,
+        "point_value": 400,
+        "respawn_on_redemption": true,
+        "redeemed_at": null,
+        "origin": "user"
+      },
+      "relationships": {
+        "category": {
+          "data": {
+            "id": "15057920",
+            "type": "category"
+          }
+        }
+      },
+      "meta": {
+        "just_redeemed": false,
+        "redeemed_by_device_id": null
+      }
+    },
+    {
+      "id": "7323221",
+      "type": "reward",
+      "attributes": {
+        "name": "Reward 2",
+        "emoji_icon": null,
+        "description": null,
+        "point_value": 250,
+        "respawn_on_redemption": true,
+        "redeemed_at": null,
+        "origin": "user"
+      },
+      "relationships": {
+        "category": {
+          "data": {
+            "id": "15057970",
+            "type": "category"
+          }
+        }
+      },
+      "meta": {
+        "just_redeemed": false,
+        "redeemed_by_device_id": null
+      }
+    }
+  ]
+}
