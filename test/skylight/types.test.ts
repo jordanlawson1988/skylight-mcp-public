@@ -31,12 +31,14 @@ test("mapChores flattens attributes and category relationships", () => {
 
 test("mapChores derives seriesId and instanceDate from composite ids and the series attribute", () => {
   const out = mapChores({ data: [
-    { id: "111881467", attributes: { summary: "A", series: 111881467, start: "2026-10-12" } },
+    { id: "111881467", attributes: { summary: "A", series: 111881467, start: "2026-10-12", recurring: true } },
     { id: "111881467-2026-10-13", attributes: { summary: "A", series: "111881467", start: "2026-10-12" } },
     { id: "777-2026-10-14", attributes: { summary: "B" } },
     { id: "888", attributes: { summary: "C" } },
     { id: "999-2026-10-15", attributes: { summary: "D", series: "not valid!" } },
     { id: "555-2026-02-30", attributes: { summary: "E" } },
+    { id: "444", attributes: { summary: "F", start: "2026-10-12", recurring: false } },
+    { id: "445", attributes: { summary: "G", start: "2026-10-12", recurrence_set: ["RRULE:FREQ=DAILY"] } },
   ] });
   assert.deepEqual(out.map((c) => [c.id, c.seriesId, c.instanceDate]), [
     ["111881467", "111881467", "2026-10-12"],
@@ -45,6 +47,8 @@ test("mapChores derives seriesId and instanceDate from composite ids and the ser
     ["888", "888", null],
     ["999-2026-10-15", "999", "2026-10-15"],
     ["555-2026-02-30", "555-2026-02-30", null],
+    ["444", "444", null],
+    ["445", "445", "2026-10-12"],
   ]);
 });
 

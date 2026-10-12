@@ -57,13 +57,19 @@ function stopReason(e: unknown): string | null {
   return null;
 }
 
-async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: string, seriesId: string): Promise<string | null> {
-  const today = new Date();
-  const iso = localDateString;
-  const after = new Date(today); after.setDate(after.getDate() - 365);
-  const before = new Date(today); before.setDate(before.getDate() + 365);
+async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: string, seriesId: string, date: string | null): Promise<string | null> {
+  let after: string;
+  let before: string;
+  if (date !== null) {
+    after = date; before = date;
+  } else {
+    const now = new Date();
+    const lo = new Date(now); lo.setDate(lo.getDate() - 30);
+    const hi = new Date(now); hi.setDate(hi.getDate() + 60);
+    after = localDateString(lo); before = localDateString(hi);
+  }
   try {
-    const chores = mapChores(await ctx.client.request({ method: "GET", path: choresPath(frameId), query: { after: iso(after), before: iso(before), include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" } }));
+    const chores = mapChores(await ctx.client.request({ method: "GET", path: choresPath(frameId), query: { after, before, include_late: false, include_up_for_grabs: true, filter: "linked_to_profile" } }));
     const hit = chores.find((c) => c.id === choreId) ?? chores.find((c) => c.id === seriesId || c.seriesId === seriesId);
     return hit?.summary ?? null;
   } catch {
@@ -101,7 +107,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_list_chores",
     {
       title: "List chores",
-      description: "List chores and routine steps in a date range (default: today through 14 days ahead). Returns ids needed for update, complete and delete. Recurring occurrences carry a seriesId and an instanceDate: pass the chore's id (or seriesId plus instanceDate) to complete and delete.",
+      description: "List chores and routine steps in a date range (default: today through 14 days ahead). Returns ids needed for update, complete and delete. Recurring occurrences carry a seriesId and an instanceDate (instanceDate is set only for recurring occurrences, null for one-time chores): pass the chore's id (or seriesId plus instanceDate) to complete and delete.",
       inputSchema: {
         after: z.string().optional().describe("Start date YYYY-MM-DD (inclusive). Default today."),
         before: z.string().optional().describe("End date YYYY-MM-DD (inclusive). Default 14 days from today."),
@@ -120,11 +126,14 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         method: "GET", path: choresPath(frameId),
         query: { after, before, include_late: args.includeLate ?? false, include_up_for_grabs: args.includeUpForGrabs ?? false, filter: "linked_to_profile" },
       }));
+      // One-time chores have no instanceDate; fall back to their start date so they sort with the rest.
+      const key = (c: Chore) => c.instanceDate ?? c.start;
       return chores.sort((a, b) => {
-        if (a.instanceDate !== b.instanceDate) {
-          if (a.instanceDate === null) return 1;
-          if (b.instanceDate === null) return -1;
-          return a.instanceDate < b.instanceDate ? -1 : 1;
+        const ka = key(a), kb = key(b);
+        if (ka !== kb) {
+          if (ka === null) return 1;
+          if (kb === null) return -1;
+          return ka < kb ? -1 : 1;
         }
         return a.summary < b.summary ? -1 : a.summary > b.summary ? 1 : 0;
       });
@@ -188,7 +197,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_update_chore",
     {
       title: "Update a chore",
-      description: "Change fields on an existing chore or routine step. Only the provided fields change.",
+      description: "Change fields on an existing chore or routine step. Only the provided fields change. An update always changes the whole series: the date part of a composite choreId is ignored.",
       inputSchema: {
         choreId: z.string().describe("Chore id from skylight_list_chores (plain or series-date form)."),
         summary: choreInputShape.summary.optional(),
@@ -242,7 +251,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         const scope = DELETE_SCOPE_TEXT[(applyTo as keyof typeof DELETE_SCOPE_TEXT | undefined) ?? "none"];
         return {
           confirmed: false,
-          wouldDelete: { seriesId: ref.seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null, summary: await findChoreSummary(ctx, frameId, choreId, ref.seriesId) },
+          wouldDelete: { seriesId: ref.seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null, summary: await findChoreSummary(ctx, frameId, choreId, ref.seriesId, date) },
           message: `Nothing was deleted. This would delete ${scope}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }

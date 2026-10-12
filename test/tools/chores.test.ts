@@ -395,3 +395,42 @@ test("complete chore rejects a malformed instanceTime without a request", async 
   assert.ok(!t.calls.some((c) => c.method === "PUT"));
   await t.close();
 });
+
+test("delete preview looks up the summary for the known date only, else a 30d back / 60d ahead window without late chores", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }]);
+  await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", applyTo: "one" });
+  let q = t.calls.at(-1)!.url.searchParams;
+  assert.equal(q.get("after"), "2026-10-14");
+  assert.equal(q.get("before"), "2026-10-14");
+  assert.equal(q.get("include_late"), "false");
+  await t.callTool("skylight_delete_chore", { choreId: "5" });
+  q = t.calls.at(-1)!.url.searchParams;
+  const day = 86_400_000;
+  const span = (Date.parse(`${q.get("before")}T00:00:00Z`) - Date.parse(`${q.get("after")}T00:00:00Z`)) / day;
+  assert.equal(span, 90);
+  assert.equal(q.get("include_late"), "false");
+  await t.close();
+});
+
+test("delete with a composite id and no applyTo uses the series path and sends no apply_to", async () => {
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5", status: 204, text: "" }]);
+  const r = await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", confirm: true });
+  assert.equal(r.isError, false);
+  const last = t.calls.at(-1)!;
+  assert.equal(last.url.pathname, "/api/frames/77/chores/5");
+  assert.equal(last.url.searchParams.has("apply_to"), false);
+  await t.close();
+});
+
+test("delete with a malformed instanceDate is a validation error before any request", async () => {
+  const t = await connectTestClient([FRAMES]);
+  for (const bad of ["2026-02-30", "10/14/2026", "tomorrow"]) {
+    for (const applyTo of [undefined, "all", "one"]) {
+      const r = await t.callTool("skylight_delete_chore", { choreId: "5", instanceDate: bad, confirm: true, ...(applyTo ? { applyTo } : {}) });
+      assert.equal(r.isError, true);
+      assert.match(r.text, /^Invalid input\. instanceDate:/);
+    }
+  }
+  assert.ok(!t.calls.some((c) => c.method === "DELETE" || c.url.pathname.endsWith("/chores")));
+  await t.close();
+});

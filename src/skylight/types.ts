@@ -6,7 +6,7 @@ export interface Chore {
   routine: boolean; recurring: boolean; recurrenceRule: string | null; rewardPoints: number | null; emoji: string | null; profileIds: string[];
   /** Numeric series id (attributes.series, else the numeric prefix of a composite id). Use it in request paths. */
   seriesId: string;
-  /** Occurrence date: the date in a composite id, else attributes.start, else null. */
+  /** Occurrence date of a recurring chore: the date in a composite id, else attributes.start. Null for one-time chores. */
   instanceDate: string | null;
 }
 export interface RewardPoints { profileId: string; points: number }
@@ -61,18 +61,19 @@ export function mapChore(resource: unknown): Chore | null {
   if (!id || summary === null) return null;
   const rs = a.recurrence_set;
   const rule = Array.isArray(rs) ? str(rs[0]) : str(rs);
+  const recurring = bool(a.recurring) ?? rule !== null;
   let ref: ChoreRef;
   try { ref = parseChoreId(id, "id"); } catch { ref = { seriesId: id, instanceDate: null }; }
   return {
     id, summary,
     start: str(a.start), startTime: str(a.start_time), status: str(a.status),
     routine: bool(a.routine) ?? false,
-    recurring: bool(a.recurring) ?? rule !== null,
+    recurring,
     recurrenceRule: rule,
     rewardPoints: num(a.reward_points), emoji: str(a.emoji_icon),
     profileIds: relationshipIds(r),
     seriesId: idOf(a.series) ?? ref.seriesId,
-    instanceDate: ref.instanceDate ?? str(a.start),
+    instanceDate: ref.instanceDate ?? (recurring ? str(a.start) : null),
   };
 }
 
