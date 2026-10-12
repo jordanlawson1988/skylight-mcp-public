@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput } from "../skylight/chore-payload.js";
-import { ValidationError } from "../skylight/errors.js";
-import { assertDate, assertId } from "../skylight/ids.js";
+import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors.js";
+import { assertDate, assertId, assertTime } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
-import { APPLY_TO_VALUES, CHORE_STATUS } from "../skylight/vocab.js";
+import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { ANNOTATIONS, run } from "./result.js";
 
@@ -31,19 +31,29 @@ export const choreInputShape = {
   emoji: z.string().optional().describe("Single emoji icon."),
 };
 
-const applyToSchema = APPLY_TO_VALUES.length > 0
-  ? z.enum(APPLY_TO_VALUES as [string, ...string[]]).optional().describe("For recurring chores only. \"one\" = only this occurrence, \"future\" = this and following occurrences, \"all\" = the whole series. Omit for one-off chores.")
+const applyToSchema = EXPOSED_APPLY_TO_VALUES.length > 0
+  ? z.enum(EXPOSED_APPLY_TO_VALUES as [string, ...string[]]).optional().describe("\"all\" = apply to the whole recurring series. Omit for one-off chores. (Per-occurrence scopes are not available yet.)")
   : undefined;
 
 function choresPath(frameId: string): string {
   return `/api/frames/${frameId}/chores`;
 }
 
-async function createOne(ctx: ToolContext, frameId: string, input: ChoreInput): Promise<Chore> {
+async function createOne(ctx: ToolContext, frameId: string, input: ChoreInput): Promise<Chore[]> {
   const body = buildChoreCreateBody(input);
   const json = await ctx.client.request<unknown>({ method: "POST", path: `${choresPath(frameId)}/create_multiple`, body });
-  const created = mapChores(json)[0] ?? mapChore((json as { data?: unknown })?.data);
-  return created ?? { id: "", summary: body.summary, start: body.start, startTime: body.start_time, status: null, routine: body.routine, recurring: body.recurrence_set !== null, recurrenceRule: body.recurrence_set?.[0] ?? null, rewardPoints: body.reward_points, emoji: body.emoji_icon, profileIds: body.category_ids };
+  const created = mapChores(json);
+  if (created.length > 0) return created;
+  const single = mapChore((json as { data?: unknown } | null)?.data);
+  return single ? [single] : [];
+}
+
+const NO_IDS_WARNING = "Skylight returned no chore ids; list chores to confirm.";
+
+function stopReason(e: unknown): string | null {
+  if (e instanceof AuthError) return "authentication failed";
+  if (e instanceof SkylightApiError && e.status === 429) return "rate limited by Skylight";
+  return null;
 }
 
 async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: string): Promise<string | null> {
@@ -75,9 +85,8 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     },
     (args) => run(async () => {
       const today = new Date().toISOString().slice(0, 10);
-      const plus14 = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
       const after = assertDate(args.after ?? today, "after");
-      const before = assertDate(args.before ?? plus14, "before");
+      const before = assertDate(args.before ?? new Date(Date.parse(`${after}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10), "before");
       if (after > before) throw new ValidationError("after", "must not be later than before");
       const frameId = await ctx.frames.resolve();
       return mapChores(await ctx.client.request({
@@ -95,7 +104,10 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       inputSchema: choreInputShape,
       annotations: ANNOTATIONS.create,
     },
-    (args) => run(async () => createOne(ctx, await ctx.frames.resolve(), args as ChoreInput))
+    (args) => run(async () => {
+      const created = await createOne(ctx, await ctx.frames.resolve(), args as ChoreInput);
+      return { created, ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) };
+    })
   );
 
   server.registerTool(
@@ -110,7 +122,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       annotations: ANNOTATIONS.create,
     },
     (args) => run(async () => {
-      const results: Array<{ index: number; summary: string; ok: boolean; id?: string; error?: string; payload?: unknown }> = [];
+      const results: Array<{ index: number; summary: string; ok: boolean; ids?: string[]; warning?: string; error?: string; payload?: unknown }> = [];
       const payloads = args.chores.map((c, index) => {
         try { return { index, payload: buildChoreCreateBody(c as ChoreInput) }; }
         catch (e) { return { index, error: e instanceof Error ? e.message : String(e) }; }
@@ -120,14 +132,17 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
           results: payloads.map((p) => ({ index: p.index, summary: args.chores[p.index]!.summary, ok: !("error" in p), ...("payload" in p ? { payload: p.payload } : { error: p.error }) })) };
       }
       const frameId = await ctx.frames.resolve();
+      let stop: string | null = null;
       for (const p of payloads) {
         const summary = args.chores[p.index]!.summary;
         if ("error" in p) { results.push({ index: p.index, summary, ok: false, error: p.error }); continue; }
+        if (stop !== null) { results.push({ index: p.index, summary, ok: false, error: `not attempted: ${stop}` }); continue; }
         try {
           const created = await createOne(ctx, frameId, args.chores[p.index] as ChoreInput);
-          results.push({ index: p.index, summary, ok: true, id: created.id });
+          results.push({ index: p.index, summary, ok: true, ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) });
         } catch (e) {
           results.push({ index: p.index, summary, ok: false, error: e instanceof Error ? e.message : String(e) });
+          stop = stopReason(e);
         }
       }
       return { dryRun: false, created: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
@@ -143,7 +158,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         choreId: z.string().describe("Chore id from skylight_list_chores."),
         summary: choreInputShape.summary.optional(),
         start: choreInputShape.start.optional(),
-        profileIds: choreInputShape.profileIds.optional(),
+        profileIds: choreInputShape.profileIds.optional().describe("Replace the assigned profiles."),
         startTime: choreInputShape.startTime,
         recurrence: choreInputShape.recurrence,
         routine: choreInputShape.routine,
@@ -169,7 +184,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_delete_chore",
     {
       title: "Delete a chore",
-      description: "Delete a chore or routine step. Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
+      description: "Delete a chore or routine step. For a recurring chore, applyTo: \"all\" deletes every occurrence. Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
       inputSchema: {
         choreId: z.string().describe("Chore id from skylight_list_chores."),
         confirm: z.boolean().optional().describe("Must be true to actually delete. Ask the user first."),
@@ -182,7 +197,8 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const id = assertId(choreId, "choreId");
       const frameId = await ctx.frames.resolve();
       if (confirm !== true) {
-        return { confirmed: false, wouldDelete: { id, summary: await findChoreSummary(ctx, frameId, id) }, message: "Nothing was deleted. Ask the user to confirm, then call again with confirm: true." };
+        const scope = applyTo === "all" ? " This would delete the whole recurring series." : "";
+        return { confirmed: false, wouldDelete: { id, summary: await findChoreSummary(ctx, frameId, id), applyTo: applyTo ?? null }, message: `Nothing was deleted.${scope} Ask the user to confirm, then call again with confirm: true.` };
       }
       await ctx.client.request({ method: "DELETE", path: `${choresPath(frameId)}/${id}`, query: applyTo === undefined ? {} : { apply_to: applyTo } });
       return { deleted: true, id };
@@ -207,11 +223,12 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const id = assertId(args.choreId, "choreId");
       const instanceDate = assertDate(args.instanceDate, "instanceDate");
       const profileId = assertId(args.profileId, "profileId");
+      const instanceTime = args.instanceTime === undefined ? null : assertTime(args.instanceTime, "instanceTime");
       const status = args.done === false ? CHORE_STATUS.notDone : CHORE_STATUS.done;
       const frameId = await ctx.frames.resolve();
       const json = await ctx.client.request<unknown>({
         method: "PUT", path: `${choresPath(frameId)}/${id}/completions`,
-        body: { status, instance_date: instanceDate, instance_time: args.instanceTime ?? null, category_id: profileId },
+        body: { status, instance_date: instanceDate, instance_time: instanceTime, category_id: profileId },
       });
       return { id, instanceDate, profileId, status, chore: mapChore((json as { data?: unknown })?.data) };
     })

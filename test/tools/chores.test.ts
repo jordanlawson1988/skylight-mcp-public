@@ -35,7 +35,9 @@ test("create chore posts create_multiple body", async () => {
   assert.equal(body.summary, "Feed dog");
   assert.deepEqual(body.recurrence_set, ["RRULE:FREQ=DAILY"]);
   assert.deepEqual(body.category_ids, ["12"]);
-  assert.equal((r.data as { id: string }).id, "5");
+  const d = r.data as { ids: string[]; created: Array<{ id: string }> };
+  assert.deepEqual(d.ids, ["5"]);
+  assert.equal(d.created[0]!.id, "5");
   await t.close();
 });
 
@@ -59,7 +61,7 @@ test("bulk create: invalid item is reported, valid items still created, no reque
     { summary: "B", start: "2026-02-30", profileIds: ["12"] },
     { summary: "C", start: "2026-10-13", profileIds: ["12"] },
   ] });
-  const d = r.data as { created: number; failed: number; results: Array<{ index: number; ok: boolean; id?: string; error?: string }> };
+  const d = r.data as { created: number; failed: number; results: Array<{ index: number; ok: boolean; ids?: string[]; error?: string }> };
   assert.equal(d.created, 2);
   assert.equal(d.failed, 1);
   assert.equal(d.results[1]!.ok, false);
@@ -86,6 +88,7 @@ test("bulk create rejects more than 50 items before any request", async () => {
   const t = await connectTestClient([FRAMES]);
   const r = await t.callTool("skylight_bulk_create_chores", { chores: Array.from({ length: 51 }, () => ({ summary: "x", start: "2026-10-13", profileIds: ["12"] })) });
   assert.equal(r.isError, true);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 0);
   await t.close();
 });
 
@@ -143,27 +146,29 @@ test("complete chore PUTs completions with vocab status", async () => {
 
 test("update chore with applyTo puts apply_to in the PUT body", async () => {
   const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "New") } }]);
-  const r = await t.callTool("skylight_update_chore", { choreId: "5", summary: "New", applyTo: "future" });
+  const r = await t.callTool("skylight_update_chore", { choreId: "5", summary: "New", applyTo: "all" });
   assert.equal(r.isError, false);
-  assert.deepEqual(t.calls.at(-1)!.body, { summary: "New", apply_to: "future" });
+  assert.deepEqual(t.calls.at(-1)!.body, { summary: "New", apply_to: "all" });
   await t.close();
 });
 
 test("delete chore with applyTo puts apply_to in the DELETE query", async () => {
   const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5", status: 204, text: "" }]);
-  const r = await t.callTool("skylight_delete_chore", { choreId: "5", confirm: true, applyTo: "future" });
+  const r = await t.callTool("skylight_delete_chore", { choreId: "5", confirm: true, applyTo: "all" });
   assert.equal(r.isError, false);
   const last = t.calls.at(-1)!;
   assert.equal(last.method, "DELETE");
-  assert.equal(last.url.searchParams.get("apply_to"), "future");
+  assert.equal(last.url.searchParams.get("apply_to"), "all");
   await t.close();
 });
 
-test("invalid applyTo is rejected and no PUT or DELETE is sent", async () => {
+test("unsupported applyTo values (future, bogus) are rejected and no PUT or DELETE is sent", async () => {
   const t = await connectTestClient([FRAMES]);
   for (const [name, args] of [
     ["skylight_update_chore", { choreId: "5", summary: "x", applyTo: "bogus" }],
     ["skylight_delete_chore", { choreId: "5", confirm: true, applyTo: "bogus" }],
+    ["skylight_update_chore", { choreId: "5", summary: "x", applyTo: "future" }],
+    ["skylight_delete_chore", { choreId: "5", confirm: true, applyTo: "future" }],
   ] as const) {
     let rejected = false;
     try {
@@ -175,5 +180,90 @@ test("invalid applyTo is rejected and no PUT or DELETE is sent", async () => {
     assert.ok(rejected, `${name} should reject applyTo: bogus`);
   }
   assert.ok(!t.calls.some((c) => c.method === "PUT" || c.method === "DELETE"));
+  await t.close();
+});
+
+test("create chore with two profiles returns both created ids", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/create_multiple", json: { data: [chore("5", "Feed dog"), chore("6", "Feed dog")] } }]);
+  const r = await t.callTool("skylight_create_chore", { summary: "Feed dog", start: "2026-10-13", profileIds: ["12", "13"] });
+  assert.equal(r.isError, false);
+  const d = r.data as { ids: string[]; created: unknown[] };
+  assert.deepEqual(d.ids, ["5", "6"]);
+  assert.equal(d.created.length, 2);
+  await t.close();
+});
+
+test("create chore with an unmappable response warns instead of fabricating an id", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/create_multiple", json: { data: [] } }]);
+  const r = await t.callTool("skylight_create_chore", { summary: "Feed dog", start: "2026-10-13", profileIds: ["12"] });
+  assert.equal(r.isError, false);
+  const d = r.data as { ids: string[]; warning?: string };
+  assert.deepEqual(d.ids, []);
+  assert.match(d.warning!, /no chore ids/);
+  await t.close();
+});
+
+test("bulk create records every id when a chore fans out to several profiles", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/create_multiple", json: { data: [chore("5", "x"), chore("6", "x")] } }]);
+  const r = await t.callTool("skylight_bulk_create_chores", { chores: [{ summary: "x", start: "2026-10-13", profileIds: ["12", "13"] }] });
+  const d = r.data as { created: number; results: Array<{ ok: boolean; ids?: string[] }> };
+  assert.equal(d.created, 1);
+  assert.deepEqual(d.results[0]!.ids, ["5", "6"]);
+  await t.close();
+});
+
+test("bulk create stops after an auth failure and marks the rest not attempted", async () => {
+  let n = 0;
+  const t = await connectTestClient([
+    FRAMES,
+    { method: "POST", path: "/oauth/token", status: 400, json: { error: "invalid_grant" } },
+    { method: "POST", path: "/api/frames/77/chores/create_multiple", handler: () => (++n === 2 ? { status: 401, text: "nope" } : { json: { data: [chore(String(n), "x")] } }) },
+  ]);
+  const r = await t.callTool("skylight_bulk_create_chores", { chores: [1, 2, 3].map((i) => ({ summary: `C${i}`, start: "2026-10-13", profileIds: ["12"] })) });
+  const d = r.data as { created: number; failed: number; results: Array<{ ok: boolean; error?: string }> };
+  assert.equal(d.results.length, 3);
+  assert.equal(d.created, 1);
+  assert.equal(d.failed, 2);
+  assert.equal(d.results[1]!.ok, false);
+  assert.match(d.results[2]!.error!, /^not attempted/);
+  assert.equal(t.calls.filter((c) => c.url.pathname.endsWith("/create_multiple")).length, 2);
+  await t.close();
+});
+
+test("bulk create stops after a 429 and marks the rest not attempted", async () => {
+  let n = 0;
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/create_multiple", handler: () => (++n === 2 ? { status: 429, text: "slow down" } : { json: { data: [chore(String(n), "x")] } }) }]);
+  const r = await t.callTool("skylight_bulk_create_chores", { chores: [1, 2, 3].map((i) => ({ summary: `C${i}`, start: "2026-10-13", profileIds: ["12"] })) });
+  const d = r.data as { created: number; failed: number; results: Array<{ ok: boolean; error?: string }> };
+  assert.equal(d.results.length, 3);
+  assert.equal(d.failed, 2);
+  assert.match(d.results[2]!.error!, /not attempted: rate limited/);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 2);
+  await t.close();
+});
+
+test("delete preview echoes applyTo scope", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [chore("5", "Dishes")] } }]);
+  const r = await t.callTool("skylight_delete_chore", { choreId: "5", applyTo: "all" });
+  const d = r.data as { wouldDelete: { applyTo: string | null }; message: string };
+  assert.equal(d.wouldDelete.applyTo, "all");
+  assert.match(d.message, /whole recurring series/);
+  assert.ok(!t.calls.some((c) => c.method === "DELETE"));
+  await t.close();
+});
+
+test("list chores defaults before to after + 14 days", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }]);
+  const r = await t.callTool("skylight_list_chores", { after: "2027-01-01" });
+  assert.equal(r.isError, false);
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("before"), "2027-01-15");
+  await t.close();
+});
+
+test("complete chore rejects a malformed instanceTime without a request", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const r = await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13", profileId: "12", instanceTime: "25:99" });
+  assert.equal(r.isError, true);
+  assert.ok(!t.calls.some((c) => c.method === "PUT"));
   await t.close();
 });
