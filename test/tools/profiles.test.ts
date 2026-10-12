@@ -18,7 +18,8 @@ test("tool list contains only expected tools with full annotations", async () =>
   for (const tool of tools) {
     const a = tool.annotations ?? {};
     for (const k of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]) assert.equal(typeof (a as Record<string, unknown>)[k], "boolean", `${tool.name}.${k}`);
-    assert.equal((a as Record<string, unknown>).openWorldHint, false);
+    // Only inviting someone by email reaches a third party.
+    assert.equal((a as Record<string, unknown>).openWorldHint, tool.name === "skylight_invite_frame_user", tool.name);
   }
   await t.close();
 });

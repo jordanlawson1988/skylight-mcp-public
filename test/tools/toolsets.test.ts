@@ -14,8 +14,8 @@ export const TOOLS_BY_TOOLSET: Record<Toolset, string[]> = {
   meals: ["skylight_list_meal_categories", "skylight_update_meal_category", "skylight_list_meals", "skylight_plan_meal", "skylight_update_meal", "skylight_delete_meal", "skylight_list_recipes", "skylight_get_recipe", "skylight_create_recipe", "skylight_update_recipe", "skylight_delete_recipe", "skylight_add_recipe_to_grocery_list"],
   photos: ["skylight_list_photos", "skylight_update_photo_caption", "skylight_delete_photos", "skylight_list_albums", "skylight_create_album", "skylight_rename_album", "skylight_delete_album", "skylight_add_photos_to_album", "skylight_remove_photos_from_album"],
   devices: ["skylight_list_devices", "skylight_update_device", "skylight_set_device_sleep", "skylight_reset_device", "skylight_remove_device"],
-  frame: [],
-  account: [],
+  frame: ["skylight_get_frame", "skylight_update_frame", "skylight_list_frame_users", "skylight_invite_frame_user", "skylight_block_frame_user", "skylight_unblock_frame_user"],
+  account: ["skylight_get_account", "skylight_set_marketing_emails"],
 };
 
 const AUTH = "skylight_auth_status";
