@@ -1,4 +1,5 @@
 // Opt-in live checks against the real Skylight API using the stored credential.
+// Phase 2 (rewards, routine reorder, lists, events) lives in live-smoke-phase2.ts and runs after the write leg below.
 // Read-only by default (also fails if balances or reward costs map to nothing). SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), recurrence variants, a morning routine step (BYHOUR, time-suffixed ids, no single-occurrence delete), an up-for-grabs chore, clearing fields with null, then a profile (create, update, assign a chore, delete, verify gone).
 import { createRuntime, assertMacOS, type Runtime } from "../src/runtime.js";
 import { listProfiles } from "../src/tools/profiles.js";
@@ -8,6 +9,7 @@ import { buildProfileCreateBody, buildProfileUpdateBody } from "../src/skylight/
 import { localDateString } from "../src/skylight/ids.js";
 import { CHORE_STATUS, ROUTINE_SLOTS } from "../src/skylight/vocab.js";
 import { deletePathId, planCompletion } from "../src/tools/chores.js";
+import { phase2Smoke } from "./live-smoke-phase2.js";
 
 async function main() {
   assertMacOS();
@@ -39,6 +41,7 @@ async function main() {
   if (!profile) throw new Error("no profile to assign to");
   console.log("using profile", `${profile.name}:${profile.id}`);
   await writeSmoke(rt, frameId, profile.id, today);
+  await phase2Smoke(rt, frameId, today);
 }
 
 const PREFIX = "[skylight-mcp smoke]";

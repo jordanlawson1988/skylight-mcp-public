@@ -11,7 +11,7 @@ import { VERSION } from "./version.js";
 export function createServer(ctx: ToolContext): McpServer {
   const server = new McpServer(
     { name: "skylight-mcp", version: VERSION },
-    { instructions: "Unofficial Skylight Calendar tools for chores, rewards and profiles. Destructive tools (delete chore, delete profile) require confirm: true; always show the user what will be deleted and get their agreement first. To retire a person without losing their events, prefer skylight_update_profile with kind \"label\" over deleting the profile." }
+    { instructions: "Unofficial Skylight Calendar tools for chores, routines, rewards, lists, calendar events and profiles. Destructive tools (delete chore, reward, list, list items, event and profile, plus redeem reward) require confirm: true; always show the user what the preview says and get their agreement first. Calendar datetimes must carry a UTC offset (for example 2026-10-12T18:30:00-04:00) because Skylight reads bare times as UTC. Events synced from Google or another calendar cannot be changed here. Deleting a recurring event by its plain id removes the whole series. To retire a person without losing their events, prefer skylight_update_profile with kind \"label\" over deleting the profile." }
   );
   registerAllTools(server, ctx);
   return server;

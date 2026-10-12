@@ -2,14 +2,16 @@
 
 ## What it is
 
-skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines and reward points on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API.
+skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists and calendar events on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API.
 
 This is an unofficial project. It is not affiliated with or endorsed by Skylight. It uses Skylight's private API, which is undocumented and can change or break at any time without notice. It runs on macOS only, because the login credential is stored with the macOS Keychain.
 
 ## Safety
 
-- The tool set is narrow. There are no tools for accounts, devices, photos, calendar events, lists or meals. Never exposed: account delete or export, email or password change, frame transfer. Reserved for later phases, each destructive action confirm-gated. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can now be created, updated and deleted.
+- The tool set is narrow. There are no tools for accounts, devices, photos or meals. Never exposed: account delete or export, email or password change, frame transfer. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can be created, updated and deleted; rewards, lists and calendar events (phase 2) can be created, changed and deleted. Every destructive action is confirm-gated.
+- Calendar events synced from Google or another calendar are read-only here: `skylight_update_event` and `skylight_delete_event` refuse them (`source` other than `skylight`) before sending any request.
 - Deleting a chore requires `confirm: true`. Without it, `skylight_delete_chore` changes nothing and returns a preview of what would be deleted.
+- Deleting a reward, a list, list items or a calendar event works the same way: the delete tools need `confirm: true` and otherwise return a preview (reward and list details, the titles of the items, or the scope and a warning when a whole recurring series would go). Deleting a list deletes its items. A recurring event deleted by its plain id, or with `applyTo: "all"`, removes the whole series. `skylight_redeem_reward` spends points, so it is confirm-gated too and its preview shows the current balance.
 - Deleting a profile works the same way: `skylight_delete_profile` needs `confirm: true`, and its preview shows the upcoming chore count and where chores and events would go. To retire a person without losing their events, use `skylight_update_profile` with `kind: "label"` (Skylight's "Convert to Label").
 - Bulk create validates every item before sending any request, supports `dryRun: true`, and stops early if Skylight rejects the login or rate limits the requests.
 - Tokens are stored encrypted with AES-256-GCM. The encryption key lives in the macOS Keychain. Any process running as your user can read that key through `/usr/bin/security` without a prompt, so the encryption protects backups and the file at rest, not against malware on the Mac.
@@ -84,15 +86,37 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | `skylight_complete_chore` | Marks a chore done, or reverts it with `done: false`. Recurring chores need the occurrence date (a composite id like `123-2026-10-13`, or `instanceDate`); one-time chores must omit it. `profileId` is optional and only for up-for-grabs chores. |
 | `skylight_get_reward_points` | Shows the point balance per profile as `{ profileId, name, kind, points, lifetimePoints }`. Labels such as Birthdays are included with `kind: "label"`. |
 | `skylight_add_reward_points` | Adds or subtracts points for one or more profiles. Negative values subtract. |
-| `skylight_list_rewards` | Lists the rewards the family has set up, with point cost and redemption state. |
+| `skylight_list_rewards` | Lists the rewards as `{ id, title, cost, emoji, description, respawnOnRedemption, redeemedAt, redeemed, profileId }`. Unredeemed rewards only, unless `includeRedeemed: true`. |
+| `skylight_create_reward` | Creates a reward for one or more people (`title`, `cost` 1-100000, `profileIds`; labels are rejected). Skylight makes one reward per profile. Optional `emoji`, `description` and `respawnOnRedemption` (default true). |
+| `skylight_update_reward` | Changes a reward's `title`, `cost`, `emoji`, `description`, `respawnOnRedemption` or owning `profileId`. Only the fields you pass change. |
+| `skylight_redeem_reward` | Spends the profile's points on a reward. Returns a preview (cost, current points, whether the balance covers it) and changes nothing unless `confirm: true`. Not idempotent. A reward that respawns reappears as a new unredeemed copy with a new id. |
+| `skylight_unredeem_reward` | Undoes a redemption: refunds the points and clears the redeemed state. |
+| `skylight_delete_reward` | Deletes a reward. Returns a preview and changes nothing unless `confirm: true` is set. |
+| `skylight_move_routine_step` | Moves a routine step before (`beforeChoreId`) or after (`afterChoreId`) another step, changing the step order. Pass exactly one anchor; ids as listed by `skylight_list_chores`. |
+| `skylight_list_lists` | Lists the lists as `{ id, title, kind, color, hiddenOnDevice, itemCount }`. `kind` is `to_do`, `shopping` or `other`. |
+| `skylight_list_items` | Items of a list as `{ id, title, done, section, position }`, sorted by section (none first) and position. `includeCompleted` defaults to true. |
+| `skylight_create_list` | Creates a list (`title`, optional `kind` default `to_do`, `color` default `#42D792`, `hiddenOnDevice`). |
+| `skylight_update_list` | Changes a list's `title`, `kind`, `color` or `hiddenOnDevice`. |
+| `skylight_delete_list` | Deletes a list and its items. Preview (title and item count) unless `confirm: true`. |
+| `skylight_add_list_items` | Adds 1-100 items (`title`, optional `section`), one request each, with per-item results and `dryRun`. Stops on a login failure or rate limit. Resend only the failed items. |
+| `skylight_update_list_item` | Renames an item (`title`), checks it off (`done`) or changes its `section` (`null` removes it from its section). |
+| `skylight_move_list_item` | Places an item after another item (`afterItemId`) or at the top (`null`). The target must be in the same section. |
+| `skylight_delete_list_items` | Deletes 1-100 items in one request. Preview lists their titles unless `confirm: true`. |
+| `skylight_list_events` | Lists calendar events between two dates (default today through 7 days ahead, at most 92 days) with `source` and `editable`. Occurrences of a recurring event have ids like `123-1791803100`. Optional `profileId` filter. |
+| `skylight_create_event` | Creates an event. Timed events take `startsAt` with a UTC offset such as `2026-10-12T18:30:00-04:00` (a time without an offset is refused, because Skylight reads it as UTC); the end defaults to one hour later. All-day events use `allDay: true` with `startDate` (and `endDate`). `profileIds` may be people or labels such as Birthdays. Optional `recurrence`, `timezone`, `location`, `description`, `emoji`, `countdown`. |
+| `skylight_update_event` | Changes fields on an event created in Skylight (the whole series for a recurring one, with `applyTo: "all"`). Refuses events synced from Google or another calendar. |
+| `skylight_delete_event` | Deletes an event. Preview unless `confirm: true`. `applyTo`: `one` or `future` need an occurrence id; `all`, or a plain id with no `applyTo`, deletes the whole series. Refuses synced events. |
 
 ## Example prompts
 
 - "Show me the profiles on our Skylight, then do a dry run of a weekly chore schedule: Ellie empties the dishwasher every Monday, Wednesday and Friday, and Sam takes out the trash every Tuesday. Don't create anything yet."
 - "Create these chores starting next Monday: make bed (daily, 5 points) for Ellie and Sam, feed the dog (daily, morning) for Sam, and set the table (weekdays) for Ellie."
+- "Add milk, eggs and bread to the grocery list, with milk and eggs under Dairy, then move bread to the top."
+- "Create a reward for Sam called Movie night for 50 points, then redeem it. Show me his balance first."
+- "Put the dentist on Monday at 4:30 pm Eastern for Ellie, repeating every week."
 - "Add a morning routine for Ellie starting tomorrow with three steps: brush teeth, get dressed, pack backpack. Run it as a dry run first and show me the payloads."
 
-Routine steps are chores with `routine: true` and a `timeOfDay` of `morning`, `afternoon` or `evening` (Skylight's only three routine slots). They take no times: a step's `startTime` is derived by Skylight from its slot, and the recurrence defaults to daily. The order of steps inside a routine is Skylight's `position` field, assigned in creation order; a tool to reorder steps is planned for a later phase. For example, the three-step prompt above creates:
+Routine steps are chores with `routine: true` and a `timeOfDay` of `morning`, `afternoon` or `evening` (Skylight's only three routine slots). They take no times: a step's `startTime` is derived by Skylight from its slot, and the recurrence defaults to daily. The order of steps inside a routine is Skylight's `position` field, assigned in creation order; `skylight_move_routine_step` reorders steps afterwards. For example, the three-step prompt above creates:
 
 ```json
 { "chores": [
@@ -111,7 +135,7 @@ npm run check        # typecheck, tests and build
 npm run live:smoke   # opt-in checks against the real API
 ```
 
-`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete a one-time chore and a daily recurring chore (including deleting a single occurrence and the whole series), the weekly, monthly, interval and until recurrences, a morning routine step (complete, revert, delete as a whole), an up-for-grabs chore, and a field-clearing update. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
+`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete a one-time chore and a daily recurring chore (including deleting a single occurrence and the whole series), the weekly, monthly, interval and until recurrences, a morning routine step (complete, revert, delete as a whole), an up-for-grabs chore, and a field-clearing update. It then runs the phase 2 leg (`scripts/live-smoke-phase2.ts`) on a dedicated smoke profile: rewards (create, update, redeem preview, redeem, unredeem, delete), reordering two routine steps, a list with items (add, complete, rename, move, bulk delete), and calendar events (all-day, timed with offset, weekly recurrence with one occurrence and the series deleted, and the refusal of a synced event when one exists). Everything it creates is prefixed `[skylight-mcp smoke]`, cleaned up in a `finally` block and checked for leftovers. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
 
 ## Credits
 
