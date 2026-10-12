@@ -80,6 +80,16 @@ test("status flags needsLogin when a refresh is rejected", async () => {
   await cleanup();
 });
 
+test("status does not demand a login for a transient refresh failure", async () => {
+  const { runtime, cleanup } = await rt([{ method: "POST", path: "/oauth/token", status: 503, text: "down" }]);
+  await runtime.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: Date.now() - 1000 });
+  const s = await status(runtime);
+  assert.equal(s.loggedIn, true);
+  assert.equal(s.needsLogin, false);
+  assert.match(s.frameError ?? "", /503/);
+  await cleanup();
+});
+
 test("status needsLogin is false when logged in and the frame resolves, true when logged out", async () => {
   const { runtime, cleanup } = await rt([{ method: "GET", path: "/api/frames/calendar", json: { data: [{ id: "77" }] } }]);
   assert.equal((await status(runtime)).needsLogin, true);

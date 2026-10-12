@@ -40,3 +40,15 @@ test("doctor reports a credential problem instead of plain not logged in", async
   assert.doesNotMatch(out, /not logged in/i);
   await cleanup();
 });
+
+test("doctor says the session expired when the refresh is rejected", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status: 400, text: '{"error":"invalid_grant"}' }]);
+  const rt = createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir }, fetch, runner });
+  await rt.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: Date.now() - 1000 });
+  const out = await doctor(rt, { serverPath: "/abs/dist/server.js" });
+  assert.match(out, /session expired or revoked\. Run: skylight-mcp login/);
+  assert.doesNotMatch(out, /Logged in/);
+  await cleanup();
+});

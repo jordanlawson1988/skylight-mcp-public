@@ -24,10 +24,38 @@ test("add reward points posts category_ids and points, then re-reads balances wi
   const rewardCalls = t.calls.filter((c) => c.url.pathname === "/api/frames/77/reward_points");
   assert.deepEqual(rewardCalls.map((c) => c.method), ["POST", "GET"]);
   assert.deepEqual(rewardCalls[0]!.body, { category_ids: ["12"], points: 5 });
-  assert.deepEqual(r.data, [{ profileId: "12", name: "Ellie", points: 45 }]);
+  assert.deepEqual(r.data, { added: { profileIds: ["12"], points: 5 }, balances: [{ profileId: "12", name: "Ellie", points: 45 }] });
   const bad = await t.callTool("skylight_add_reward_points", { profileIds: ["12"], points: 99999 });
   assert.equal(bad.isError, true);
   assert.equal(t.calls.filter((c) => c.method === "POST").length, 1);
+  await t.close();
+});
+
+test("add reward points: failed re-read after a successful POST is not an error and says not to retry", async () => {
+  const t = await connectTestClient([
+    FRAMES, CATEGORIES,
+    { method: "POST", path: "/api/frames/77/reward_points", json: { data: [] } },
+    { method: "GET", path: "/api/frames/77/reward_points", status: 500, text: "boom" },
+  ]);
+  const r = await t.callTool("skylight_add_reward_points", { profileIds: ["12"], points: 5 });
+  assert.equal(r.isError, false);
+  const d = r.data as { added: unknown; balances: unknown; warning?: string };
+  assert.deepEqual(d.added, { profileIds: ["12"], points: 5 });
+  assert.equal(d.balances, null);
+  assert.match(d.warning ?? "", /Do not retry the add/);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 1);
+  await t.close();
+});
+
+test("balances fall back to null names when the profile lookup fails", async () => {
+  const t = await connectTestClient([
+    FRAMES,
+    { method: "GET", path: "/api/frames/77/categories", status: 500, text: "boom" },
+    { method: "GET", path: "/api/frames/77/reward_points", json: { data: [{ id: "1", attributes: { category_id: 12, points: 40 } }] } },
+  ]);
+  const r = await t.callTool("skylight_get_reward_points");
+  assert.equal(r.isError, false);
+  assert.deepEqual(r.data, [{ profileId: "12", name: null, points: 40 }]);
   await t.close();
 });
 

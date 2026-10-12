@@ -206,6 +206,14 @@ test("other refresh failures append the login hint", async () => {
   const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status: 503, text: "down" }]);
   await assert.rejects(
     refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: { version: 1, accessToken: "a", refreshToken: "r", fingerprint: "f", expiresAt: 0 } }),
-    (e: unknown) => e instanceof AuthError && /\(503\): down/.test(e.message) && /skylight-mcp login/.test(e.message)
+    (e: unknown) => e instanceof AuthError && /\(503\): down\. Run `skylight-mcp login` if this persists\.$/.test(e.message) && /skylight-mcp login/.test(e.message)
+  );
+});
+
+test("refresh failure with an empty body has no double separator", async () => {
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status: 502, text: "" }]);
+  await assert.rejects(
+    refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: { version: 1, accessToken: "a", refreshToken: "r", fingerprint: "f", expiresAt: 0 } }),
+    (e: unknown) => e instanceof AuthError && e.message === "Skylight token refresh failed (502). Run `skylight-mcp login` if this persists."
   );
 });

@@ -12,6 +12,8 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
   if (!s.loggedIn) {
     if (s.credentialError) lines.push(`Login:      credential problem: ${s.credentialError}`);
     else lines.push(`Login:      not logged in. Run: skylight-mcp login`);
+  } else if (s.needsLogin) {
+    lines.push(`Login:      session expired or revoked. Run: skylight-mcp login`);
   } else {
     lines.push(`Login:      Logged in (token valid until ${s.tokenExpiresAt})`);
     try {

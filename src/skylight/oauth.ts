@@ -133,7 +133,8 @@ async function tokenRequest(opts: {
     if (!res.ok) {
       if (opts.what === "token refresh") {
         if (res.status === 400 || res.status === 401) throw new AuthError("Your Skylight session expired or was revoked. Run `skylight-mcp login` again.");
-        throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text, opts.secrets)} Run \`skylight-mcp login\` if this persists.`);
+        const body = excerpt(text, opts.secrets).replace(/\.+$/, "");
+        throw new AuthError(`Skylight ${opts.what} failed (${res.status})${body ? `: ${body}` : ""}. Run \`skylight-mcp login\` if this persists.`);
       }
       throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text, opts.secrets)}`);
     }

@@ -48,7 +48,7 @@ export async function status(rt: Runtime): Promise<StatusReport> {
     frameId = await rt.frames.resolve();
   } catch (e) {
     frameError = e instanceof Error ? e.message : String(e);
-    needsLogin = e instanceof AuthError && e.message.includes("skylight-mcp login");
+    needsLogin = e instanceof AuthError && /expired or was revoked|Not logged in|rejected the credentials/.test(e.message);
   }
   return { loggedIn: true, needsLogin, apiHost, tokenExpiresAt: new Date(cred.expiresAt).toISOString(), frameId, frameError, credentialError: null };
 }

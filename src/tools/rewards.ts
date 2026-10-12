@@ -9,7 +9,12 @@ import { ANNOTATIONS, run } from "./result.js";
 
 async function readBalances(ctx: ToolContext, frameId: string): Promise<Array<{ profileId: string; name: string | null; points: number }>> {
   const balances = mapRewardPoints(await ctx.client.request({ method: "GET", path: `/api/frames/${frameId}/reward_points` }));
-  const names = new Map((await listProfiles(ctx)).map((p) => [p.id, p.name]));
+  let names = new Map<string, string>();
+  try {
+    names = new Map((await listProfiles(ctx)).map((p) => [p.id, p.name]));
+  } catch {
+    // Names are a convenience; fall back to null rather than failing the read.
+  }
   return balances.map((b) => ({ profileId: b.profileId, name: names.get(b.profileId) ?? null, points: b.points }));
 }
 
@@ -27,7 +32,7 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
     "skylight_add_reward_points",
     {
       title: "Add or subtract reward points",
-      description: "Adjust reward points for one or more profiles. Negative points subtract. Not idempotent: repeating the call adds the points again. Confirm the amount with the user before subtracting. Returns the balances re-read after the change as { profileId, name, points }. Profile ids come from skylight_list_profiles.",
+      description: "Adjust reward points for one or more profiles. Negative points subtract. Not idempotent: repeating the call adds the points again. Confirm the amount with the user before subtracting. Returns { added: { profileIds, points }, balances } where balances are re-read after the change as [{ profileId, name, points }]. If the re-read fails, balances is null and a warning says the points were still added: do not retry the add, call skylight_get_reward_points instead. Profile ids come from skylight_list_profiles.",
       inputSchema: {
         profileIds: z.array(z.string()).min(1).max(20).describe("Profile ids from skylight_list_profiles."),
         points: z.number().int().describe("Points to add (negative subtracts). Range -10000 to 10000."),
@@ -40,7 +45,12 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
       const points = assertPoints(args.points, "points");
       const frameId = await ctx.frames.resolve();
       await ctx.client.request({ method: "POST", path: `/api/frames/${frameId}/reward_points`, body: { category_ids: ids, points } });
-      return readBalances(ctx, frameId);
+      const added = { profileIds: ids, points };
+      try {
+        return { added, balances: await readBalances(ctx, frameId) };
+      } catch {
+        return { added, balances: null, warning: "Points were added, but balances could not be re-read. Call skylight_get_reward_points to confirm. Do not retry the add." };
+      }
     })
   );
 
