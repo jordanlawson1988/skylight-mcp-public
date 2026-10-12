@@ -8,10 +8,10 @@ import { makeTmpDir } from "../helpers/tmp-dir.js";
 
 async function rt(routes: MockRoute[]) {
   const { dir, cleanup } = await makeTmpDir();
-  const { runner } = createFakeKeychain();
+  const { runner, items } = createFakeKeychain();
   const { fetch, calls } = createMockFetch(routes);
   const runtime = createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir }, fetch, runner });
-  return { runtime, calls, cleanup };
+  return { runtime, calls, items, cleanup };
 }
 
 test("assertMacOS", () => {
@@ -53,6 +53,19 @@ test("status reports logged out, then logged in with frame", async () => {
   assert.equal(s.frameId, "77");
   assert.ok(s.tokenExpiresAt);
   assert.ok(!JSON.stringify(s).includes("AT"));
+  await cleanup();
+});
+
+test("status surfaces credential read failures instead of reporting logged out", async () => {
+  const { runtime, items, cleanup } = await rt([]);
+  await runtime.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: Date.now() + 10_000_000 });
+  for (const k of items.keys()) items.set(k, Buffer.alloc(32, 7).toString("base64"));
+  const s = await status(runtime);
+  assert.equal(s.loggedIn, false);
+  assert.match(s.credentialError ?? "", /could not be decrypted/);
+  assert.equal(s.frameId, null);
+  const clean = await status((await rt([])).runtime);
+  assert.equal(clean.credentialError, null);
   await cleanup();
 });
 

@@ -28,14 +28,20 @@ export interface StatusReport {
   tokenExpiresAt: string | null;
   frameId: string | null;
   frameError: string | null;
+  credentialError: string | null;
 }
 
 export async function status(rt: Runtime): Promise<StatusReport> {
   const apiHost = new URL(rt.config.apiBaseUrl).host;
-  const cred = await rt.store.read().catch(() => null);
-  if (cred === null) return { loggedIn: false, apiHost, tokenExpiresAt: null, frameId: null, frameError: null };
+  let cred;
+  try {
+    cred = await rt.store.read();
+  } catch (e) {
+    return { loggedIn: false, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: e instanceof Error ? e.message : String(e) };
+  }
+  if (cred === null) return { loggedIn: false, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: null };
   let frameId: string | null = null;
   let frameError: string | null = null;
   try { frameId = await rt.frames.resolve(); } catch (e) { frameError = e instanceof Error ? e.message : String(e); }
-  return { loggedIn: true, apiHost, tokenExpiresAt: new Date(cred.expiresAt).toISOString(), frameId, frameError };
+  return { loggedIn: true, apiHost, tokenExpiresAt: new Date(cred.expiresAt).toISOString(), frameId, frameError, credentialError: null };
 }

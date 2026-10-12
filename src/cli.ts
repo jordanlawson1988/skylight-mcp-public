@@ -10,6 +10,7 @@ const USAGE = `skylight-mcp ${VERSION}
 
 Usage:
   skylight-mcp login [--callback <url>] [--pkce S256|plain]   Sign in via Skylight's web page
+  skylight-mcp login --complete <url>                        Finish a login started earlier (reuses its pending state)
   skylight-mcp logout                                        Remove the stored credential
   skylight-mcp status                                        Show login and frame status (no secrets)
   skylight-mcp doctor                                        Check setup and print Claude Desktop config
@@ -20,6 +21,23 @@ function arg(argv: string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+function loggedInMessage(expiresAt: number): string {
+  return `\nLogged in. Access token valid until ${new Date(expiresAt).toLocaleString()}.\nRun \`skylight-mcp doctor\` to finish setup.\n`;
+}
+
+async function promptCallback(): Promise<string> {
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = await new Promise<string>((resolve, reject) => {
+      rl.once("close", () => reject(new Error("No callback URL was entered. Run `skylight-mcp login` again or pass --callback <url>.")));
+      rl.question("3. Paste it here: ").then(resolve, reject);
+    });
+    return answer.trim();
+  } finally {
+    rl.close();
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
   const cmd = argv[0];
   if (!cmd || cmd === "--help" || cmd === "-h") { stdout.write(USAGE); return 0; }
@@ -28,17 +46,19 @@ async function main(argv: string[]): Promise<number> {
   const rt = createRuntime();
 
   if (cmd === "login") {
+    const completeUrl = arg(argv, "--complete");
+    if (argv.includes("--complete")) {
+      if (!completeUrl) throw new Error("--complete needs the full callback URL.");
+      const { expiresAt } = await completeLogin(rt, completeUrl);
+      stdout.write(loggedInMessage(expiresAt));
+      return 0;
+    }
     const method = arg(argv, "--pkce") === "plain" ? "plain" : "S256";
     const { url } = await startLogin(rt, { method });
     stdout.write(`\n1. Open this link in your browser and sign in to Skylight:\n\n   ${url}\n\n2. After sign-in you land on https://ourskylight.com/welcome?code=...\n   Copy that full address from the address bar.\n\n`);
-    let callback = arg(argv, "--callback");
-    if (!callback) {
-      const rl = createInterface({ input: stdin, output: stdout });
-      callback = (await rl.question("3. Paste it here: ")).trim();
-      rl.close();
-    }
+    const callback = arg(argv, "--callback") ?? (await promptCallback());
     const { expiresAt } = await completeLogin(rt, callback);
-    stdout.write(`\nLogged in. Access token valid until ${new Date(expiresAt).toLocaleString()}.\nRun \`skylight-mcp doctor\` to finish setup.\n`);
+    stdout.write(loggedInMessage(expiresAt));
     return 0;
   }
   if (cmd === "logout") {
