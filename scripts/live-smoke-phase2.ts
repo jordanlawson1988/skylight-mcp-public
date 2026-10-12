@@ -12,12 +12,12 @@ import { mapChores, mapProfile, mapRewardPoints, mapRewards } from "../src/skyli
 import { OWN_EVENT_SOURCE } from "../src/skylight/vocab.js";
 import { WEEKDAYS } from "../src/skylight/rrule.js";
 
-const PREFIX = "[skylight-mcp smoke]";
+export const PREFIX = "[skylight-mcp smoke]";
 
-interface ToolResult { isError: boolean; text: string; data: unknown }
+export interface ToolResult { isError: boolean; text: string; data: unknown }
 
 /** An in-memory MCP client over a runtime whose fetch records every non-GET /api request, so a test can prove a tool sent nothing. */
-async function connectTools(writes: string[]) {
+export async function connectTools(writes: string[]) {
   const recording = (async (input: string | URL | Request, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
     const path = new URL(typeof input === "string" || input instanceof URL ? input : input.url).pathname;
@@ -39,7 +39,7 @@ async function connectTools(writes: string[]) {
   return { call, close: async () => { await client.close(); await server.close(); } };
 }
 
-const ok = (r: ToolResult, what: string): unknown => {
+export const ok = (r: ToolResult, what: string): unknown => {
   if (r.isError) throw new Error(`${what} failed: ${r.text}`);
   return r.data;
 };

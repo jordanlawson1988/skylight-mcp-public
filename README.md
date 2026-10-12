@@ -2,13 +2,18 @@
 
 ## What it is
 
-skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists and calendar events on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API.
+skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists, calendar events, the meal plan and recipes, photos and albums, devices, frame settings and sharing on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API.
 
 This is an unofficial project. It is not affiliated with or endorsed by Skylight. It uses Skylight's private API, which is undocumented and can change or break at any time without notice. It runs on macOS only, because the login credential is stored with the macOS Keychain.
 
 ## Safety
 
-- The tool set is narrow. There are no tools for accounts, devices, photos or meals. Never exposed: account delete or export, email or password change, frame transfer. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can be created, updated and deleted; rewards, lists and calendar events (phase 2) can be created, changed and deleted. Every destructive action is confirm-gated.
+- The tool set is deliberate, not complete. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can be created, updated and deleted; rewards, lists and calendar events (phase 2) can be created, changed and deleted; and phase 3 adds the meal plan and recipes, photos and albums, devices, frame settings and sharing, and the plan and marketing flag. Every destructive action is confirm-gated. Never exposed: account delete or export, email or password change, frame transfer, alarms and sleep schedules, device config, renaming or hiding the frame, push-notification preferences, and who can see the family's photos (`open_to_public` and `message_viewability`: their values are unverified and a wrong one could publish photos).
+- Photo files and links (`asset_url`, `thumbnail_url`), share links, the frame's notification email and the account's email, phone, birthday and name are never returned by any tool. `skylight_list_photos` returns ids, dates, captions and who sent each photo, nothing that opens the file.
+- Deleting photos is permanent and removes them for everyone who shares the frame. `skylight_delete_photos` needs `confirm: true`; its preview lists each photo's date and caption and refuses ids that are not on the frame. Deleting an album keeps its photos on the frame.
+- Resetting or removing a device is the most disruptive thing the server can do (a reset wipes the screen; a removed device leaves the frame). `skylight_reset_device` and `skylight_remove_device` need BOTH `confirm: true` and `confirmName`, the device's exact current name (case-sensitive); anything less returns a preview and changes nothing, and a wrong name is refused with the expected one.
+- Some actions send real email to people outside the family, so they are confirm-gated too: `skylight_invite_frame_user` (`confirm: true`) and an event's `invitedEmails` (`confirmInvites: true`, on `skylight_create_event` and `skylight_update_event`). Without the flag you get a preview of the addresses and nothing is created, changed or sent. `skylight_block_frame_user` is confirm-gated and refuses the frame owner.
+- Meals and recipes: `skylight_delete_meal` needs `confirm: true` and names the date and scope in its preview; a repeating meal always needs an explicit `applyTo`. `skylight_delete_recipe` needs `confirm: true`; its preview counts the meals planned with the recipe in the next 60 days and says whether they would be deleted (`alsoDeletePlannedMeals`, default false).
 - Calendar events synced from Google or another calendar are read-only here: `skylight_update_event` and `skylight_delete_event` refuse them (`source` other than `skylight`) before sending any request.
 - Deleting a chore requires `confirm: true`. Without it, `skylight_delete_chore` changes nothing and returns a preview of what would be deleted.
 - Deleting a reward, a list, list items or a calendar event works the same way: the delete tools need `confirm: true` and otherwise return a preview (reward and list details, the titles of the items, or the scope and a warning when a whole recurring series would go). Deleting a list deletes its items. A recurring event deleted by its plain id, or with `applyTo: "all"`, removes the whole series. `skylight_redeem_reward` spends points, so it is confirm-gated too and its preview shows the current balance.
@@ -67,7 +72,26 @@ skylight-mcp doctor
 }
 ```
 
-If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` block of that entry. `doctor` includes it when it is set in your environment.
+If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` block of that entry. `doctor` includes it when it is set in your environment, and does the same for `SKYLIGHT_TIMEZONE` and `SKYLIGHT_TOOLSETS`.
+
+## Toolsets
+
+By default the server registers every tool (more than sixty), which some assistants handle poorly. Set `SKYLIGHT_TOOLSETS` to a comma list to trim the tool list to the groups you use:
+
+| Toolset | Tools |
+| --- | --- |
+| `profiles` | list, create, update and delete profiles and labels |
+| `chores` | chores and routine steps |
+| `rewards` | reward points and rewards |
+| `lists` | lists and list items |
+| `calendar` | calendar events |
+| `meals` | the meal plan, meal categories and recipes |
+| `photos` | photos, captions and albums |
+| `devices` | device settings, sleep, reset and remove |
+| `frame` | frame settings and who shares the frame |
+| `account` | the plan and the marketing-email flag |
+
+`skylight_auth_status` is always registered. Names are case-insensitive. An unknown name stops the server with an error that names it and lists the valid ones. Example for the `env` block of the Claude Desktop entry: `"SKYLIGHT_TOOLSETS": "chores,lists,calendar,meals"`. `skylight-mcp doctor` prints the enabled toolsets.
 
 ## Tools
 
@@ -103,9 +127,43 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | `skylight_move_list_item` | Places an item after another item (`afterItemId`) or at the top (`null`). The target must be in the same section. |
 | `skylight_delete_list_items` | Deletes 1-100 items in one request. Preview lists their titles unless `confirm: true`. |
 | `skylight_list_events` | Lists calendar events between two dates (default today through 7 days ahead, at most 92 days) with `source` and `editable`. Occurrences of a recurring event have ids like `123-1791803100`. Optional `profileId` filter. |
-| `skylight_create_event` | Creates an event. Timed events take `startsAt` as `2026-10-12T18:30`, read as Eastern time (or your `SKYLIGHT_TIMEZONE`) unless you add an offset such as `-04:00` or `Z`; the end defaults to one hour later. All-day events use `allDay: true` with `startDate` (and `endDate`). `profileIds` may be people or labels such as Birthdays. Optional `recurrence`, `timezone`, `location`, `description`, `emoji`, `countdown`. Results carry a human `when`. |
-| `skylight_update_event` | Changes fields on an event created in Skylight (the whole series for a recurring one, with `applyTo: "all"`). Refuses events synced from Google or another calendar. |
+| `skylight_create_event` | Creates an event. Timed events take `startsAt` as `2026-10-12T18:30`, read as Eastern time (or your `SKYLIGHT_TIMEZONE`) unless you add an offset such as `-04:00` or `Z`; the end defaults to one hour later. All-day events use `allDay: true` with `startDate` (and `endDate`). `profileIds` may be people or labels such as Birthdays. Optional `recurrence`, `timezone`, `location`, `description`, `emoji`, `countdown`. `invitedEmails` (up to 20) makes Skylight email an invitation to each address, so it needs `confirmInvites: true` (otherwise a preview). Results carry a human `when`. |
+| `skylight_update_event` | Changes fields on an event created in Skylight (the whole series for a recurring one, with `applyTo: "all"`). Accepts `invitedEmails` with `confirmInvites: true` like create (an empty list is ignored, it never removes invitees). Refuses events synced from Google or another calendar. |
 | `skylight_delete_event` | Deletes an event. Preview unless `confirm: true`. `applyTo`: `one` or `future` need an occurrence id; `all`, or a plain id with no `applyTo`, deletes the whole series. Refuses synced events. |
+| `skylight_list_meal_categories` | Lists the meal slots (Breakfast, Lunch, Dinner, Snack) as `{ id, name, color, enabled, position }`. |
+| `skylight_update_meal_category` | Renames a meal slot, changes its `#RRGGBB` `color`, or turns it off or on (`enabled`). |
+| `skylight_list_meals` | Lists planned meals between two dates (default today through 7 days ahead, at most 62 days apart), one row per date: `{ mealId, date, category, title, recipeId, note, recurring, recurrenceRule }`, sorted by date and slot. |
+| `skylight_plan_meal` | Plans a meal for a `date` in a `category` (id or name, any case). Exactly one of `recipeId` or `title`; optional `note`, `description`, `recurrence` and `addToGroceryList` (default false; needs a recipe; adds its ingredients to the default grocery list). Returns the created rows. |
+| `skylight_update_meal` | Changes a planned meal on one of its dates (`title`, `note`, `description`, `category`, `recipeId`). A repeating meal needs `applyTo`: `one` changes that date only and splits it into its own meal with a new `mealId`, `future` that date and later, `all` every date. A one-time meal takes no `applyTo`. |
+| `skylight_delete_meal` | Deletes a planned meal on one date (same `applyTo` rule). Preview (title, date, "only this date" / "this date and later" / "every date of this meal" / "this meal") unless `confirm: true`. |
+| `skylight_list_recipes` | Lists recipes as `{ id, title, category, ingredientCount }`. |
+| `skylight_get_recipe` | One recipe with `ingredients` and `instructions` parsed from the app's `Ingredients:` / `Instructions:` layout (null when a section is missing). |
+| `skylight_create_recipe` | Creates a recipe: `title`, `category`, and either a `description` or `ingredients` (with optional `instructions`), which are written in the app's layout. |
+| `skylight_update_recipe` | Changes a recipe's title, category, description, ingredients or instructions. It reads the recipe first and merges, because Skylight needs all three fields on every update. |
+| `skylight_delete_recipe` | Deletes a recipe. Preview (with the planned meals in the next 60 days that use it) unless `confirm: true`. `alsoDeletePlannedMeals: true` deletes those meals too (default false). |
+| `skylight_add_recipe_to_grocery_list` | Asks Skylight to add the recipe's ingredients to the default grocery list; they appear a few seconds later. Not idempotent: calling twice adds them twice. |
+| `skylight_list_photos` | Lists photos and videos, newest first, one page at a time: `{ page, pages, photos: [{ id, type, createdAt, caption, from, commentsCount }] }`. No file links. |
+| `skylight_update_photo_caption` | Sets a photo's caption (up to 200 characters); an empty caption clears it. |
+| `skylight_delete_photos` | PERMANENTLY deletes 1-50 photos for everyone. Preview (each photo's date and caption) unless `confirm: true`. |
+| `skylight_list_albums` | Lists albums as `{ id, title, photoCount, videoCount, editable }`. |
+| `skylight_create_album` | Creates an empty album. |
+| `skylight_rename_album` | Renames an album (built-in albums are refused). |
+| `skylight_delete_album` | Deletes an album; its photos stay on the frame. Preview unless `confirm: true`. |
+| `skylight_add_photos_to_album` | Adds 1-100 photos to an album. |
+| `skylight_remove_photos_from_album` | Takes 1-100 photos out of an album (they stay on the frame). |
+| `skylight_list_devices` | Lists devices with their name, brightness, sleep window, slideshow settings and `currentAlbumId` (`"all"` or an album id). |
+| `skylight_update_device` | Changes only the settings you pass: `name`, `brightness` (0-255), `sleepsAt` / `wakesAt` (HH:mm), `sleepModeOn`, `showCaption`, `showHeart`, `blurEffect`, `startSound`, `slideshowSpeed` (1-3600), `slideshowStyle` (0-10), `albumId` (an id or `"all"`). |
+| `skylight_set_device_sleep` | Puts the screen to sleep (`asleep: true`) or wakes it. |
+| `skylight_reset_device` | Resets a device (the screen is wiped and must be set up again). Needs `confirmName` (the exact device name) AND `confirm: true`; otherwise a preview. |
+| `skylight_remove_device` | Removes a device from the frame. Needs `confirmName` AND `confirm: true`; otherwise a preview. |
+| `skylight_get_frame` | The frame's name, time zone, household name, locale, photo-sharing setting, enabled `features` and `plus`. No share link or contact details. |
+| `skylight_update_frame` | Changes the household name (`null` clears it), time zone or locale. Photo privacy settings are deliberately not available. |
+| `skylight_list_frame_users` | Lists who shares the frame: `{ userId, email, status, owner }`. |
+| `skylight_invite_frame_user` | Invites a person by email. Skylight emails them, so it previews unless `confirm: true`. |
+| `skylight_block_frame_user` | Blocks someone from the frame (never the owner). Preview unless `confirm: true`. |
+| `skylight_unblock_frame_user` | Gives a blocked person access again, or approves one who is waiting. |
+| `skylight_get_account` | The plan, subscriptions (`{ status, cadence, type }`) and marketing-email flag. No email, phone, birthday or name. |
+| `skylight_set_marketing_emails` | Turns Skylight's marketing emails on or off. |
 
 ## Example prompts
 
@@ -114,6 +172,10 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 - "Add milk, eggs and bread to the grocery list, with milk and eggs under Dairy, then move bread to the top."
 - "Create a reward for Sam called Movie night for 50 points, then redeem it. Show me his balance first."
 - "Put the dentist on Monday at 4:30 pm Eastern for Ellie, repeating every week."
+- "Plan tacos for Tuesday dinner and every Tuesday after, then add the ingredients to the grocery list."
+- "Create a recipe called Sheet-pan chicken for dinner with these ingredients and steps, then put it on Thursday."
+- "Show me the newest photos, caption the first one 'First day of school', and make an album called School 2026 with it."
+- "Dim the Skylight to 40% and put it to sleep at 9:30 pm."
 - "Add a morning routine for Ellie starting tomorrow with three steps: brush teeth, get dressed, pack backpack. Run it as a dry run first and show me the payloads."
 
 Routine steps are chores with `routine: true` and a `timeOfDay` of `morning`, `afternoon` or `evening` (Skylight's only three routine slots). They take no times: a step's `startTime` is derived by Skylight from its slot, and the recurrence defaults to daily. The order of steps inside a routine is Skylight's `position` field, assigned in creation order; `skylight_move_routine_step` reorders steps afterwards. For example, the three-step prompt above creates:
@@ -144,7 +206,7 @@ npm run check        # typecheck, tests and build
 npm run live:smoke   # opt-in checks against the real API
 ```
 
-`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete a one-time chore and a daily recurring chore (including deleting a single occurrence and the whole series), the weekly, monthly, interval and until recurrences, a morning routine step (complete, revert, delete as a whole), an up-for-grabs chore, and a field-clearing update. It then runs the phase 2 leg (`scripts/live-smoke-phase2.ts`) on a dedicated smoke profile: rewards (create, update, redeem preview, redeem, unredeem, delete), reordering two routine steps, a list with items (add, complete, rename, move, bulk delete), and calendar events (all-day, timed with offset, weekly recurrence with one occurrence and the series deleted, and the refusal of a synced event when one exists). Everything it creates is prefixed `[skylight-mcp smoke]`, cleaned up in a `finally` block and checked for leftovers. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
+`npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete a one-time chore and a daily recurring chore (including deleting a single occurrence and the whole series), the weekly, monthly, interval and until recurrences, a morning routine step (complete, revert, delete as a whole), an up-for-grabs chore, and a field-clearing update. It then runs the phase 2 leg (`scripts/live-smoke-phase2.ts`) on a dedicated smoke profile: rewards (create, update, redeem preview, redeem, unredeem, delete), reordering two routine steps, a list with items (add, complete, rename, move, bulk delete), and calendar events (all-day, timed with offset, weekly recurrence with one occurrence and the series deleted, and the refusal of a synced event when one exists). After that comes the phase 3 leg (`scripts/live-smoke-phase3.ts`): a recipe with two `zzsmoke` ingredients (parsed back), a one-time and a daily meal, `applyTo` one (a new `mealId` appears), delete one date and the rest of the series, adding the recipe to the grocery list and waiting up to 15 seconds for the two items (then deleting them), deleting the recipe together with its planned meal, an album (create, rename, add and remove the newest photo, delete), setting and restoring the newest photo's caption, flipping and restoring a device's `showHeart`, and a no-op frame time-zone update. The smoke never resets or removes a device, deletes photos, invites or blocks anyone, or changes marketing emails. Everything it creates is prefixed `[skylight-mcp smoke]`, cleaned up in a `finally` block and checked for leftovers. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
 
 ## Credits
 

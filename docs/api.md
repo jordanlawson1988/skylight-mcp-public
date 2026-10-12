@@ -90,6 +90,63 @@ Source tags: [bundle] read from the Skylight web app bundle, [live] observed on 
 - Synced calendars: events whose `source` is not `skylight` (80 Google events in a two-week window on the test frame) live on the frame too. The update and delete tools look the event up in a listing (a 3-day window around an occurrence, or a year either side of today for a plain id) and refuse with "this event comes from a synced <source> calendar; change it there". Two failure modes differ on purpose: if the lookup request itself fails (any API error) the tools fail CLOSED with "could not verify whether this event comes from a synced calendar; try again"; if the lookup succeeds but the event is not in the window they fail OPEN and let the request through, so the server decides. Residual risk: a synced event more than 365 days from today (or an occurrence outside its 3-day window) is not detected. When the lookup finds nothing, the delete preview says it could not check and that a whole series may go.
 - Datetimes: the tools accept fractional seconds (`2026-10-12T18:30:00.000-04:00`) so listed values can be passed back unchanged.
 
+## Phase 3: meals, recipes, photos, devices, frame, sharing, account
+
+Source tags: [live] observed against a real frame on 2026-10-12 (the sanitized responses are in `test/fixtures/`), [bundle] read from the web app bundle and NOT exercised live. Every path below is under `/api/frames/{f}` unless it starts with `/api/`.
+
+### Meal categories and recipes [live]
+
+- `GET /meals/categories` returns `{ data: [{ id, type: "meal_category", attributes { color, icon, label, enabled, position } }] }` (Breakfast, Lunch, Dinner, Snack). `PATCH /meals/categories/{id}` takes any of `{ label, color, enabled }`. The tool maps `label` to `name` and drops `icon`.
+- `GET /meals/recipes?include=meal_category` returns `{ data: [{ id, type: "meal_recipe", attributes { summary, description, draft, image_url, source }, relationships { meal_category, partner } }], included: [category...] }`. `GET /meals/recipes/{id}?include=meal_category,partner` is the same for one.
+- `POST /meals/recipes?include=meal_category` with `{ meal_category_id, summary, description }` returns `{ data: recipe }`. `PATCH /meals/recipes/{id}?include=meal_category` takes the same body and Skylight wants all three fields, so `skylight_update_recipe` reads the recipe first and merges. `DELETE /meals/recipes/{id}` takes an optional `apply_to_sittings=true`, which ALSO deletes meals planned with the recipe and answers `{ meta: { deleted_sitting_ids } }`.
+- Description convention used by the app: `Ingredients:\n- a\n- b\n\nInstructions:\n1. x\n2. y\n`. `skylight_get_recipe` parses it (heading match ignores case, an ingredient is a `- ` line, instruction numbering is stripped); a description with no such section yields null lists and is never rebuilt by an ingredients/instructions update.
+- `POST /meals/recipes/{id}/add_to_grocery_list` with `{ draft: false }` returns `{ data: recipe, meta: { auto_creation_intent_id } }`. Skylight then extracts the ingredients asynchronously (a few seconds) and adds them to the default grocery list (`lists[].attributes.default_grocery_list === true`). `{ draft: true }` adds nothing visible, so the tool always sends false. Calling it twice adds the items twice.
+
+### Meal plan ("sittings") [live]
+
+- `GET /meals/sittings?date_min=YYYY-MM-DD&date_max=YYYY-MM-DD&include=meal_category,meal_recipe` (`date_min` required) returns `{ data: [sitting], included, meta }`. A sitting has `attributes { summary, description, note, rrule, draft, recurring, instances: ["YYYY-MM-DD", ...] }` and `relationships { meal_category, meal_recipe (nullable), profiles }`. One sitting row covers several dates (`instances`); `skylight_list_meals` explodes it into one row per date. `rrule` is stored WITHOUT the `RRULE:` prefix (`FREQ=DAILY`).
+- `POST /meals/sittings?date_min=..&date_max=..&include=..` with `{ meal_category_id, meal_recipe_id?, add_to_grocery_list, summary?, date, note?, description?, rrule? }` returns `{ data: [sitting] }`. With a recipe and no summary the title and description come from the recipe. `rrule: "RRULE:FREQ=DAILY"` is accepted and stored as `FREQ=DAILY`; the tool strips the prefix itself (`stripRrulePrefix`) after building the rule with `buildRrule` (no `BYHOUR`).
+- `PATCH /meals/sittings/{id}/instances/{date}?date_min&date_max&include&apply_to=one|future|all` takes any of `{ summary, note, description, meal_category_id, meal_recipe_id, rrule }`. A one-time sitting takes NO `apply_to`. `apply_to=one` on a recurring sitting splits that date into a NEW sitting (new id) and removes the date from the series, so the tool re-reads the date after the update and returns the meals on it. The tool does not expose `rrule` changes.
+- `DELETE /meals/sittings/{id}/instances/{date}?apply_to=..`: on a recurring sitting `one` removes that date, `future` truncates the rule with `UNTIL`, `all` deletes the series (and the sittings split from it). On a one-time sitting any `apply_to` is a 422 ("must not provide apply_to with a non-recurring..."). The tools therefore look the meal up on that date first and require `applyTo` exactly when `recurring` is true (`MEAL_SCOPE` in `vocab.ts`).
+
+### Photos ("messages") and albums
+
+- `GET /messages?page=N` [live] returns `{ data: [message], meta { current_page, num_pages, frame_owner } }` with `attributes { asset_type ("photo" | "video"), created_at, caption, comments_count, from_email, sender_id, asset_url, thumbnail_url, ... }`. `GET /messages/{id}` works [live]. `PUT /messages/{id}/caption` with `{ caption }` works [live, verified and reverted]. The tools never return `asset_url`, `thumbnail_url`, storage keys or owner ids (`mapPhoto` reads only id, type, created time, caption, sender email and comment count).
+- `DELETE /messages/destroy_multiple` with `{ message_ids: [numbers] }` and `DELETE /messages/{id}` are [bundle] only: never live-tested, because it would delete real photos. The bundle's own client passes the ids as the request parameters of an `apisauce.delete`, so whether Skylight reads them from the body or the query is unconfirmed; the body form is the one verified for the sibling `lists/{id}/list_items/bulk_destroy`. `skylight_delete_photos` is confirm-gated, checks every id with `GET /messages/{id}` first (preview and confirm), and sends one body request.
+- Albums [live]: `GET /albums` returns `{ data: [{ id, type: "album_with_messages", attributes { title, kind, editable, exclude_from_slideshow, photos_count, videos_count, thumbnails }, relationships.messages.data }] }`. `POST /albums` `{ title }`, `PATCH /albums/{id}` `{ title }`, `DELETE /albums/{id}`, `GET /albums/{id}/messages`, `POST /albums/add_to` and `POST /albums/remove_from` with `{ album_ids: [n], message_ids: [n] }` (numbers). Albums with `editable: false` are refused by rename and delete.
+
+### Devices [live unless marked]
+
+- `GET /devices` and `GET /devices/{id}` return `attributes { name, timezone, activated, brightness (0-255), slideshow_speed, slideshow_style, start_sound, show_caption, show_heart, blur_effect, current_album_id (-1 = every photo), sleeps_at "HH:mm", wakes_at "HH:mm", currently_sleeping, sleep_mode_on, side_by_side, sleep_mode, sleep_sound, sleep_sound_volume, nightlight, nightlight_brightness, nightlight_color, notify_on_new_photos }`. The tools show `current_album_id` as `"all"` for -1.
+- `PUT /devices/{id}` with a PARTIAL body leaves every other field untouched (verified: `show_heart` flipped while `brightness` and `sleeps_at` stayed). `{ name }` and `{ current_album_id }` work. `skylight_update_device` sends only the fields given (`buildDeviceUpdateBody`); ranges: brightness 0-255, slideshow speed 1-3600, style 0-10.
+- `POST /devices/{id}/start_sleep` and `/end_sleep` [bundle]. `POST /devices/{id}/reset` and `DELETE /devices/{id}` [bundle, never live-tested]: both tools need the device's exact `confirmName` AND `confirm: true`.
+- NOT built: alarms and sleep schedule blocks (this family's device answers 422 "Device must be a buddy device"), `device_config` (403 "Feature is not enabled for this device").
+
+### Frame
+
+- `GET /api/frames/{f}` [live] returns `attributes` including `name`, `timezone`, `household_name`, `locale`, `open_to_public`, `message_viewability`, `feature_bundle` (feature name to `{ enabled }`; the tool renames `meal_planning` to `meals`), `plus`, and fields the tools never return: `share_token`, `notification_email`, `owner_name`, `owner_birthday`, `hardware_model`, gift and trial fields.
+- `PUT /api/frames/{f}` with any of `{ household_name, timezone, locale }` works [live: a no-op timezone]. `open_to_public` and `message_viewability` are accepted by Skylight too, but their vocabulary is unverified and a wrong value could publish the family's photos, so `skylight_update_frame` deliberately does not expose them (nor any other privacy field). Changing the frame's time zone does not change `SKYLIGHT_TIMEZONE`.
+- NOT built: `PUT /frames/{f}/rename` (Skylight answers 422 "Contact support to rename this device") and `POST /frames/{f}/hide` (it would remove the frame from the account the server itself uses).
+
+### Frame sharing
+
+- `GET /frames/{f}/users` [live] returns `{ data: [{ id, type: "frame_user", attributes { status, is_owner }, relationships.user.data.id }], included: [{ id, type: "user", attributes { email } }] }`. `status` is `approved`, `rejected` (blocked) or `awaiting_approval` (`FRAME_USER_STATUS`).
+- `POST /frames/{f}/users` `{ email }` invites (it SENDS AN EMAIL), `DELETE /frames/{f}/users/{userId}` blocks, `POST /frames/{f}/users/{userId}/approve` unblocks or approves [bundle, never live-tested]. `{userId}` is the id of the `user` (the `included` record and `relationships.user.data.id`), not the `frame_user` row id; the app's own user list passes it the same way and hides the owner. The invite, block and unblock tools read the list first (an address already on the frame, an unknown id, the owner and an already-blocked user are refused).
+
+### Account
+
+- `GET /api/user` [live] returns `attributes { subscription_status, agreed_to_marketing, notification_preference, ... }` plus personal fields (email, phone, birthday, profile name) that the tool never reads. `PATCH /api/user/klaviyo_toggler` with `{ agreed_to_marketing: boolean }` works [live, no-op].
+- `GET /api/plus_access` [bundle] returns `{ data: { subscriptions: [{ type: "subscription", attributes { plus_type, status, ... } }], shares, bundle_entitlement } }`. `skylight_get_account` maps `plus_type` to `type` and reads `status` and `cadence` (null when absent); this response was not captured as a fixture, so the mapper is covered by an inline test only.
+- NOT built: push-notification preferences (the value is null and its vocabulary is unknown).
+
+### Calendar invites [bundle]
+
+- Event create and update take `invited_emails: string[]`; Skylight emails each address an invitation. Not live-tested by design. The tools accept `invitedEmails` (0-20, validated, lower-cased, de-duplicated) and require `confirmInvites: true` when the list is non-empty. On update an empty list is validated but not sent: whether Skylight treats `[]` as "remove the invitees" is unknown, so clearing invitees is not exposed, and whether re-sending an already-invited address emails it again is unknown.
+
+### Toolsets
+
+- `SKYLIGHT_TOOLSETS` (comma list of `profiles, chores, rewards, lists, calendar, meals, photos, devices, frame, account`, default all) selects which tool groups register; `skylight_auth_status` is always registered. This is local configuration, not an API fact (`TOOLSETS` in `vocab.ts`).
+
 ## Verified chore semantics
 
 Verified live on 2026-10-12 against app.ourskylight.com.
