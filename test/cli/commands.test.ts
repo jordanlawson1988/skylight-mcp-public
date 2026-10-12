@@ -124,11 +124,13 @@ test("completeLoginFromChrome looks up the callback since the pending login star
   await cleanup();
 });
 
-test("completeLoginFromChrome reports a clear error when Chrome has no callback, and keeps the pending login", async () => {
+test("completeLoginFromChrome reports a clear error (without telling the user to restart) when Chrome has no callback, and keeps the pending login", async () => {
   const { runtime, cleanup } = await rt([]);
   await startLogin(runtime);
   await assert.rejects(completeLoginFromChrome(runtime, async () => null), (e: Error) => e.message === NO_CHROME_CALLBACK_MESSAGE);
   assert.ok(await runtime.store.readPendingLogin());
+  assert.doesNotMatch(NO_CHROME_CALLBACK_MESSAGE, /login` again/);
+  assert.match(NO_CHROME_CALLBACK_MESSAGE, /press Enter here to check again, or paste the callback address/);
   await cleanup();
 });
 

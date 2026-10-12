@@ -20,18 +20,27 @@ export async function completeLogin(rt: Runtime, callbackUrl: string): Promise<{
 }
 
 export const NO_CHROME_CALLBACK_MESSAGE =
-  "No Skylight sign-in found in Chrome's history since this login started. Sign in with the link above in Chrome, then run `skylight-mcp login` again and press Enter \u2014 or paste the callback address with `skylight-mcp login --complete <url>`.";
+  "No Skylight sign-in found in Chrome's history since this login started. Sign in with the link in Chrome, then press Enter here to check again, or paste the callback address.";
 
-/** Finish a pending login using the callback URL recovered from Chrome's history (Enter at the prompt). */
-export async function completeLoginFromChrome(
-  rt: Runtime,
-  find: (o: { since: number }) => Promise<string | null> = findCallbackInChromeHistory,
-): Promise<{ expiresAt: number }> {
+type FindCallback = (o: { since: number }) => Promise<string | null>;
+
+/**
+ * Finish a pending login using the callback URL recovered from Chrome's history.
+ * Returns null when Chrome's history has no sign-in yet (the pending login is kept so the caller can retry).
+ */
+export async function tryCompleteLoginFromChrome(rt: Runtime, find: FindCallback = findCallbackInChromeHistory): Promise<{ expiresAt: number } | null> {
   const pending = await rt.store.readPendingLogin();
   if (pending === null) throw new AuthError("No login in progress. Run `skylight-mcp login` first.");
   const callback = await find({ since: pending.createdAt });
-  if (callback === null) throw new AuthError(NO_CHROME_CALLBACK_MESSAGE);
+  if (callback === null) return null;
   return completeLogin(rt, callback);
+}
+
+/** Non-interactive variant: throws when Chrome's history has no sign-in. */
+export async function completeLoginFromChrome(rt: Runtime, find: FindCallback = findCallbackInChromeHistory): Promise<{ expiresAt: number }> {
+  const result = await tryCompleteLoginFromChrome(rt, find);
+  if (result === null) throw new AuthError(NO_CHROME_CALLBACK_MESSAGE);
+  return result;
 }
 
 export function logout(rt: Runtime): Promise<boolean> {

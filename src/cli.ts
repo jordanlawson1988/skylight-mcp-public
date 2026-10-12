@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
-import { completeLogin, completeLoginFromChrome, logout, startLogin, status } from "./cli/commands.js";
+import { completeLogin, logout, startLogin, status } from "./cli/commands.js";
 import { doctor } from "./cli/doctor.js";
+import { runLoginPrompt, type LoginFlowIo } from "./cli/login-flow.js";
 import { assertMacOS, createRuntime } from "./runtime.js";
 import { VERSION } from "./version.js";
 
@@ -25,17 +26,19 @@ function loggedInMessage(expiresAt: number): string {
   return `\nLogged in. Access token valid until ${new Date(expiresAt).toLocaleString()}.\nRun \`skylight-mcp doctor\` to finish setup.\n`;
 }
 
-async function promptCallback(): Promise<string> {
+/** One readline interface for the whole login so piped input is not lost between prompts. */
+function openPrompter(): { io: LoginFlowIo; close: () => void } {
   const rl = createInterface({ input: stdin, output: stdout });
-  try {
-    const answer = await new Promise<string>((resolve, reject) => {
-      rl.once("close", () => reject(new Error("Login prompt closed before finishing. Run `skylight-mcp login` again.")));
-      rl.question("   > ").then(resolve, reject);
-    });
-    return answer.trim();
-  } finally {
-    rl.close();
-  }
+  const lines = rl[Symbol.asyncIterator]();
+  const io: LoginFlowIo = {
+    async ask(prompt) {
+      stdout.write(prompt);
+      const next = await lines.next();
+      return next.done ? null : next.value.trim();
+    },
+    write: (text) => { stdout.write(text); },
+  };
+  return { io, close: () => rl.close() };
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -56,10 +59,18 @@ async function main(argv: string[]): Promise<number> {
     const method = arg(argv, "--pkce") === "plain" ? "plain" : "S256";
     const { url } = await startLogin(rt, { method });
     stdout.write(`\n1. Open this link in your browser and sign in to Skylight:\n\n   ${url}\n\n2. After sign-in, Skylight bounces you straight to its home page, so you\n   usually can't copy the callback address. That's fine: just come back here.\n\n3. Press Enter to finish (reads the sign-in result from Chrome's history),\n   or paste the https://ourskylight.com/welcome?code=... address if you have it:\n\n`);
-    const callback = await promptCallback();
-    const { expiresAt } = callback === "" ? await completeLoginFromChrome(rt) : await completeLogin(rt, callback);
-    stdout.write(loggedInMessage(expiresAt));
-    return 0;
+    const prompter = openPrompter();
+    try {
+      const result = await runLoginPrompt(rt, prompter.io);
+      if (result.status === "quit") {
+        stdout.write("Login not finished. The pending login stays valid for 10 minutes; run `skylight-mcp login --complete <url>` to finish it.\n");
+        return 1;
+      }
+      stdout.write(loggedInMessage(result.expiresAt));
+      return 0;
+    } finally {
+      prompter.close();
+    }
   }
   if (cmd === "logout") {
     const removed = await logout(rt);

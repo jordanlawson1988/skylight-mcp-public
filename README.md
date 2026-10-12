@@ -37,7 +37,7 @@ skylight-mcp login
 
 The command prints a link to Skylight's authorize page. Open it in Chrome and sign in. The page needs Skylight's own server-side sign-in, not the session from the Skylight web app, so you may be asked to sign in even if the web app is already open.
 
-After sign-in, Skylight sends the browser to `https://ourskylight.com/welcome?code=...` and then immediately redirects to its home page, so you usually cannot copy the callback address from the address bar. That is fine. Go back to the terminal and press Enter. The CLI then looks in Chrome's local history for that one URL and finishes the login.
+After sign-in, Skylight sends the browser to `https://ourskylight.com/welcome?code=...` and then immediately redirects to its home page, so you usually cannot copy the callback address from the address bar. That is fine. Go back to the terminal and press Enter. The CLI then looks in Chrome's local history for that one URL and finishes the login. If nothing is found yet, it says so and asks again: press Enter to check again, paste the callback address, or type `q` to quit. The pending login stays valid for 10 minutes across retries.
 
 What that lookup does: it reads only history entries whose URL starts with `https://ourskylight.com/welcome?code=` and that were visited after the login started. It copies Chrome's `History` database to a private temp directory (mode 0700), queries the copy with the macOS `/usr/bin/sqlite3` in read-only mode, and deletes the copy afterwards. Nothing else in your history is read, and the URL is never printed or logged. This only works with Google Chrome.
 
