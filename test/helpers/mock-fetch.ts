@@ -31,7 +31,7 @@ export function createMockFetch(routes: MockRoute[]) {
     const out = route.handler ? route.handler({ url, init, body }) : route;
     const status = out.status ?? route.status ?? 200;
     const text = out.json !== undefined ? JSON.stringify(out.json) : (out.text ?? "");
-    return new Response(text, { status, headers: { "content-type": "application/json", ...(route.headers ?? {}) } });
+    return new Response(text === "" ? null : text, { status, headers: { "content-type": "application/json", ...(route.headers ?? {}) } });
   };
   return { fetch: fetch as unknown as typeof globalThis.fetch, calls };
 }
