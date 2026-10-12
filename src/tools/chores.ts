@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput } from "../skylight/chore-payload.js";
+import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput, type ChoreUpdateInput } from "../skylight/chore-payload.js";
 import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertId, assertTime, localDateString, parseChoreId } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
@@ -209,21 +209,21 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_update_chore",
     {
       title: "Update a chore",
-      description: "Change fields on an existing chore or routine step. Only the provided fields change. An update always changes the whole series: the date part of a composite choreId is ignored.",
+      description: "Change fields on an existing chore or routine step. Only the provided fields change; pass null for startTime, emoji, rewardPoints, description, timerSeconds or recurrence to clear them. An update always changes the whole series: the date part of a composite choreId is ignored.",
       inputSchema: {
         choreId: z.string().describe("Chore id exactly as returned by skylight_list_chores: plain, series-date or series-date-HHMM."),
         summary: choreInputShape.summary.optional(),
         start: choreInputShape.start.optional(),
         profileIds: choreInputShape.profileIds.optional().describe("Replace the assigned profiles."),
-        startTime: choreInputShape.startTime,
-        recurrence: choreInputShape.recurrence,
+        startTime: choreInputShape.startTime.nullable().describe("HH:mm 24-hour. Not allowed on routine steps. null clears the time."),
+        recurrence: choreInputShape.recurrence.nullable().describe("New schedule for the whole series. null makes the chore one-off (clears the recurrence)."),
         routine: choreInputShape.routine,
         timeOfDay: choreInputShape.timeOfDay,
         upForGrabs: choreInputShape.upForGrabs,
-        rewardPoints: choreInputShape.rewardPoints,
-        emoji: choreInputShape.emoji,
-        description: choreInputShape.description,
-        timerSeconds: choreInputShape.timerSeconds,
+        rewardPoints: choreInputShape.rewardPoints.nullable().describe("Points earned on completion (-10000 to 10000). null clears the points."),
+        emoji: choreInputShape.emoji.nullable().describe("Single emoji icon. null clears it."),
+        description: choreInputShape.description.nullable().describe("Longer details, up to 500 characters. null clears it."),
+        timerSeconds: choreInputShape.timerSeconds.nullable().describe("Countdown timer length in seconds (0-86400). null clears it."),
         applyTo: updateApplyToSchema,
       },
       annotations: ANNOTATIONS.update,
@@ -231,7 +231,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     (args) => run(async () => {
       const { choreId, applyTo, ...rest } = args as Record<string, unknown> & { choreId: string; applyTo?: string };
       const { seriesId: id } = parseChoreId(choreId, "choreId");
-      const body: Record<string, unknown> = buildChoreUpdateBody(rest as Partial<ChoreInput>);
+      const body: Record<string, unknown> = buildChoreUpdateBody(rest as ChoreUpdateInput);
       if (applyTo !== undefined) body.apply_to = applyTo;
       const frameId = await ctx.frames.resolve();
       const json = await ctx.client.request<unknown>({ method: "PUT", path: `${choresPath(frameId)}/${id}`, body });

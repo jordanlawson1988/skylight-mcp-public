@@ -21,6 +21,16 @@ export interface ChoreInput {
   timerSeconds?: number;
 }
 
+/** Fields an update may clear (null) as well as change. */
+export type ChoreUpdateInput = Omit<Partial<ChoreInput>, "startTime" | "emoji" | "rewardPoints" | "description" | "timerSeconds" | "recurrence"> & {
+  startTime?: string | null;
+  emoji?: string | null;
+  rewardPoints?: number | null;
+  description?: string | null;
+  timerSeconds?: number | null;
+  recurrence?: Recurrence | null;
+};
+
 export interface ChoreCreateBody {
   summary: string;
   start: string | null;
@@ -60,9 +70,10 @@ function slotHour(slot: RoutineSlot | undefined): (typeof ROUTINE_SLOTS)[Routine
 }
 
 /** Server rules (verified live): routines have a blank start_time and exactly one BYHOUR in their rule; other chores must not have BYHOUR. */
-function routineRecurrence(input: Pick<ChoreInput, "timeOfDay" | "startTime" | "recurrence">): Recurrence {
+function routineRecurrence(input: Pick<ChoreUpdateInput, "timeOfDay" | "startTime" | "recurrence">): Recurrence {
   if (input.timeOfDay === undefined) throw new ValidationError("routine", "routine steps need timeOfDay: morning, afternoon or evening");
-  if (input.startTime !== undefined) throw new ValidationError("startTime", "routines use timeOfDay, not startTime");
+  if (input.startTime !== undefined && input.startTime !== null) throw new ValidationError("startTime", "routines use timeOfDay, not startTime");
+  if (input.recurrence === null) throw new ValidationError("recurrence", "routine steps need a recurrence; omit it for daily");
   return { ...(input.recurrence ?? { frequency: "daily" }), hour: slotHour(input.timeOfDay) };
 }
 
@@ -98,31 +109,31 @@ export function buildChoreCreateBody(input: ChoreInput): ChoreCreateBody {
   };
 }
 
-export function buildChoreUpdateBody(input: Partial<ChoreInput>): Partial<ChoreCreateBody> {
+export function buildChoreUpdateBody(input: ChoreUpdateInput): Partial<ChoreCreateBody> {
   const out: Partial<ChoreCreateBody> = {};
   if (input.summary !== undefined) out.summary = cleanText(input.summary, "summary", 500);
   if (input.start !== undefined) out.start = assertDate(input.start, "start");
   // An update cannot see the stored routine flag, so only what is passed is validated.
-  let recurrence: Recurrence | undefined = input.recurrence;
+  let recurrence: Recurrence | null | undefined = input.recurrence;
   if (input.routine === true) recurrence = routineRecurrence(input);
   else if (input.timeOfDay !== undefined) {
     if (input.routine === false) throw new ValidationError("routine", "timeOfDay is only for routine steps");
-    if (input.startTime !== undefined) throw new ValidationError("startTime", "routines use timeOfDay, not startTime");
-    if (recurrence === undefined) throw new ValidationError("recurrence", "is required with timeOfDay on update, because the hour is part of the schedule; pass the full recurrence");
+    if (input.startTime !== undefined && input.startTime !== null) throw new ValidationError("startTime", "routines use timeOfDay, not startTime");
+    if (recurrence === undefined || recurrence === null) throw new ValidationError("recurrence", "is required with timeOfDay on update, because the hour is part of the schedule; pass the full recurrence");
     recurrence = { ...recurrence, hour: slotHour(input.timeOfDay) };
-  } else if (recurrence !== undefined) recurrence = plainRecurrence(recurrence);
-  if (input.startTime !== undefined) out.start_time = assertTime(input.startTime, "startTime");
+  } else if (recurrence) recurrence = plainRecurrence(recurrence);
+  if (input.startTime !== undefined) out.start_time = input.startTime === null ? null : assertTime(input.startTime, "startTime");
   if (input.routine !== undefined) out.routine = input.routine;
   if (input.upForGrabs !== undefined) out.up_for_grabs = input.upForGrabs;
   if (recurrence !== undefined) {
-    out.recurrence_set = [buildRrule(recurrence)];
-    out.recurring_until = recurrence.until ?? null;
+    out.recurrence_set = recurrence === null ? null : [buildRrule(recurrence)];
+    out.recurring_until = recurrence?.until ?? null;
   }
   if (input.profileIds !== undefined) out.category_ids = profileIds(input.profileIds);
-  if (input.rewardPoints !== undefined) out.reward_points = assertPoints(input.rewardPoints, "rewardPoints");
-  if (input.emoji !== undefined) out.emoji_icon = assertEmoji(input.emoji, "emoji");
-  if (input.description !== undefined) out.description = cleanText(input.description, "description", MAX_DESCRIPTION_LENGTH);
-  if (input.timerSeconds !== undefined) out.timer_seconds = assertTimerSeconds(input.timerSeconds, "timerSeconds");
+  if (input.rewardPoints !== undefined) out.reward_points = input.rewardPoints === null ? null : assertPoints(input.rewardPoints, "rewardPoints");
+  if (input.emoji !== undefined) out.emoji_icon = input.emoji === null ? null : assertEmoji(input.emoji, "emoji");
+  if (input.description !== undefined) out.description = input.description === null ? null : cleanText(input.description, "description", MAX_DESCRIPTION_LENGTH);
+  if (input.timerSeconds !== undefined) out.timer_seconds = input.timerSeconds === null ? null : assertTimerSeconds(input.timerSeconds, "timerSeconds");
   if (Object.keys(out).length === 0) throw new ValidationError("update", "provide at least one field to change");
   return out;
 }

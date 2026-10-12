@@ -598,3 +598,28 @@ test("update chore sends description and timer_seconds", async () => {
   assert.equal(bad.isError, true);
   await t.close();
 });
+
+test("update chore with nulls sends nulls in the body to clear fields", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "x") } }]);
+  const r = await t.callTool("skylight_update_chore", { choreId: "5", startTime: null, emoji: null, rewardPoints: null, description: null, timerSeconds: null, recurrence: null });
+  assert.equal(r.isError, false);
+  assert.deepEqual(t.calls.at(-1)!.body, { start_time: null, emoji_icon: null, reward_points: null, description: null, timer_seconds: null, recurrence_set: null, recurring_until: null });
+  await t.close();
+});
+
+test("update chore with null rewardPoints alone clears only the points; omitted fields stay out of the body", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "x") } }]);
+  await t.callTool("skylight_update_chore", { choreId: "5", rewardPoints: null });
+  assert.deepEqual(t.calls.at(-1)!.body, { reward_points: null });
+  await t.close();
+});
+
+test("only the documented update fields accept null", async () => {
+  const t = await connectTestClient([FRAMES]);
+  for (const field of ["summary", "start", "profileIds"]) {
+    const r = await t.callTool("skylight_update_chore", { choreId: "5", [field]: null }).catch(() => ({ isError: true }));
+    assert.equal(r.isError, true, field);
+  }
+  assert.ok(!t.calls.some((c) => c.method === "PUT"));
+  await t.close();
+});

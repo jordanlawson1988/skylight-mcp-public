@@ -101,3 +101,18 @@ test("description and timerSeconds are validated and sent on create and update",
   }
   assert.equal(buildChoreCreateBody({ summary: "x", start: "2026-10-13", profileIds: ["1"], timerSeconds: 86400 }).timer_seconds, 86400);
 });
+
+test("update null clears nullable fields", () => {
+  assert.deepEqual(
+    buildChoreUpdateBody({ startTime: null, emoji: null, rewardPoints: null, description: null, timerSeconds: null, recurrence: null }),
+    { start_time: null, emoji_icon: null, reward_points: null, description: null, timer_seconds: null, recurrence_set: null, recurring_until: null },
+  );
+  assert.deepEqual(buildChoreUpdateBody({ rewardPoints: null }), { reward_points: null });
+  assert.deepEqual(buildChoreUpdateBody({ rewardPoints: 0 }), { reward_points: 0 });
+});
+
+test("update null still respects routine rules", () => {
+  assert.deepEqual(buildChoreUpdateBody({ routine: true, timeOfDay: "morning", startTime: null }), { start_time: null, routine: true, recurrence_set: ["RRULE:FREQ=DAILY;BYHOUR=6"], recurring_until: null });
+  assert.throws(() => buildChoreUpdateBody({ routine: true, timeOfDay: "morning", recurrence: null }), (e: unknown) => e instanceof ValidationError && e.field === "recurrence");
+  assert.throws(() => buildChoreUpdateBody({ timeOfDay: "morning", recurrence: null }), (e: unknown) => e instanceof ValidationError && e.field === "recurrence");
+});
