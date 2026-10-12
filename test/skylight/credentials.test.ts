@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import { createCredentialStore } from "../../src/skylight/credentials.js";
+import { AuthError } from "../../src/skylight/errors.js";
 import { createFakeKeychain } from "../helpers/fake-keychain.js";
 import { makeTmpDir } from "../helpers/tmp-dir.js";
 
@@ -105,5 +106,65 @@ test("withRefreshLock serializes separate store instances sharing a directory (f
   // Which instance wins the lockfile is a race; what matters is that the critical sections never overlap.
   assert.equal(order.length, 4);
   assert.match(order.join(","), /^(a-start,a-end,b-start,b-end|b-start,b-end,a-start,a-end)$/);
+  await cleanup();
+});
+
+test("two instances racing over a pre-existing stale lock never overlap and leave no lockfile behind", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const { writeFile, utimes } = await import("node:fs/promises");
+  await writeFile(`${dir}/refresh.lock`, "dead-owner");
+  const old = new Date(Date.now() - 120_000);
+  await utimes(`${dir}/refresh.lock`, old, old);
+  const a = createCredentialStore({ dir, apiBaseUrl: BASE, runner });
+  const b = createCredentialStore({ dir, apiBaseUrl: BASE, runner });
+  let inside = 0;
+  let maxInside = 0;
+  const section = async () => {
+    inside++;
+    maxInside = Math.max(maxInside, inside);
+    await new Promise((r) => setTimeout(r, 50));
+    inside--;
+  };
+  await Promise.all([a.withRefreshLock(section), b.withRefreshLock(section)]);
+  assert.equal(maxInside, 1);
+  assert.deepEqual((await readdir(dir)).filter((f) => f.startsWith("refresh.lock")), []);
+  await cleanup();
+});
+
+test("a holder whose lock was replaced does not delete the new owner's lockfile", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const { writeFile } = await import("node:fs/promises");
+  const store = createCredentialStore({ dir, apiBaseUrl: BASE, runner });
+  await store.withRefreshLock(async () => { await writeFile(`${dir}/refresh.lock`, "someone-else"); });
+  assert.equal(await readFile(`${dir}/refresh.lock`, "utf8"), "someone-else");
+  await cleanup();
+});
+
+test("a stored iv or tag of the wrong length fails closed", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const store = createCredentialStore({ dir, apiBaseUrl: BASE, runner });
+  await store.write(cred);
+  const { writeFile } = await import("node:fs/promises");
+  const file = (await readdir(dir)).find((f) => f.endsWith(".json"))!;
+  const enc = JSON.parse(await readFile(`${dir}/${file}`, "utf8"));
+  await writeFile(`${dir}/${file}`, JSON.stringify({ ...enc, tag: Buffer.from(enc.tag, "base64").subarray(0, 4).toString("base64") }));
+  await assert.rejects(store.read(), /could not be decrypted/);
+  await writeFile(`${dir}/${file}`, JSON.stringify({ ...enc, iv: Buffer.alloc(16, 1).toString("base64") }));
+  await assert.rejects(store.read(), /could not be decrypted/);
+  await cleanup();
+});
+
+test("a corrupt pending-login file is an AuthError that does not echo its contents", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const store = createCredentialStore({ dir, apiBaseUrl: BASE, runner });
+  const { writeFile } = await import("node:fs/promises");
+  for (const bad of ["garbage-SECRET{", JSON.stringify({ state: "s" }), JSON.stringify({ state: "s", verifier: "v", fingerprint: "f", createdAt: "1", method: "S256" }), JSON.stringify({ state: "s", verifier: "v", fingerprint: "f", createdAt: 1, method: "md5" })]) {
+    await writeFile(`${dir}/pending-login.json`, bad);
+    await assert.rejects(store.readPendingLogin(), (e: unknown) => e instanceof AuthError && /pending login file is corrupt/.test(e.message) && !e.message.includes("SECRET"));
+  }
   await cleanup();
 });
