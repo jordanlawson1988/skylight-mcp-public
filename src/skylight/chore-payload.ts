@@ -55,7 +55,8 @@ export function assertTimerSeconds(value: number, field: string): number {
   return value;
 }
 
-function profileIds(ids: string[]): string[] {
+/** 1..20 distinct valid ids. Shared by the reward and event payload builders. */
+export function assertProfileIds(ids: string[]): string[] {
   if (!Array.isArray(ids) || ids.length === 0) throw new ValidationError("profileIds", "must list at least one profile id");
   if (ids.length > MAX_PROFILES_PER_CHORE) throw new ValidationError("profileIds", `must list at most ${MAX_PROFILES_PER_CHORE} profiles`);
   const out = ids.map((id) => assertId(id, "profileIds"));
@@ -92,7 +93,7 @@ export function buildChoreCreateBody(input: ChoreInput): ChoreCreateBody {
   if (!grabs && input.start === undefined) throw new ValidationError("start", "is required unless upForGrabs is true");
   if (!grabs && input.profileIds === undefined) throw new ValidationError("profileIds", "is required unless upForGrabs is true");
   // Verified live: an up-for-grabs chore accepts category_ids: [] and start: null.
-  const categoryIds = input.profileIds === undefined || (grabs && input.profileIds.length === 0) ? [] : profileIds(input.profileIds);
+  const categoryIds = input.profileIds === undefined || (grabs && input.profileIds.length === 0) ? [] : assertProfileIds(input.profileIds);
   return {
     summary: cleanText(input.summary, "summary", 500),
     start: input.start === undefined ? null : assertDate(input.start, "start"),
@@ -129,7 +130,7 @@ export function buildChoreUpdateBody(input: ChoreUpdateInput): Partial<ChoreCrea
     out.recurrence_set = recurrence === null ? null : [buildRrule(recurrence)];
     out.recurring_until = recurrence?.until ?? null;
   }
-  if (input.profileIds !== undefined) out.category_ids = profileIds(input.profileIds);
+  if (input.profileIds !== undefined) out.category_ids = assertProfileIds(input.profileIds);
   if (input.rewardPoints !== undefined) out.reward_points = input.rewardPoints === null ? null : assertPoints(input.rewardPoints, "rewardPoints");
   if (input.emoji !== undefined) out.emoji_icon = input.emoji === null ? null : assertEmoji(input.emoji, "emoji");
   if (input.description !== undefined) out.description = input.description === null ? null : cleanText(input.description, "description", MAX_DESCRIPTION_LENGTH);
