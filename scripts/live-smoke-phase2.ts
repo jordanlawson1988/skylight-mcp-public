@@ -62,7 +62,7 @@ export async function phase2Smoke(rt: Runtime, frameId: string, today: string): 
 
   let profileId: string | null = null;
   const choreSeries: string[] = [];
-  const leftovers = { rewards: 0, lists: 0, events: 0 };
+  const leftovers = { rewards: 0, lists: 0, events: 0, steps: 0 };
   const smokeRewards = async () => {
     const open = mapRewards(await get("/rewards"));
     const redeemed = mapRewards(await get("/rewards", { redeemed_at_min: "1970-01-01T00:00:00Z" }));
@@ -131,7 +131,10 @@ export async function phase2Smoke(rt: Runtime, frameId: string, today: string): 
     const p1 = await positions();
     if (!moved.moved || (p1.get(second) ?? Infinity) >= (p1.get(first) ?? -Infinity)) throw new Error(`step two is not before step one after the move: ${JSON.stringify([...p1])}`);
     step("routine step two moved before step one");
-    for (const id of choreSeries.splice(0)) await rt.client.request({ method: "DELETE", path: `${frame}/chores/${id}`, query: { apply_to: "all" } });
+    for (const id of [...choreSeries]) {
+      await rt.client.request({ method: "DELETE", path: `${frame}/chores/${id}`, query: { apply_to: "all" } });
+      choreSeries.splice(choreSeries.indexOf(id), 1);
+    }
     step("routine steps deleted");
 
     // ---- Lists: create, add 3 items (one sectioned), complete, rename, move within the null section, bulk delete two, delete list.
@@ -222,14 +225,21 @@ export async function phase2Smoke(rt: Runtime, frameId: string, today: string): 
       console.log("note: no synced event in the next 14 days; refusal not exercised live");
     }
   } finally {
-    for (const id of choreSeries) {
-      try { await rt.client.request({ method: "DELETE", path: `${frame}/chores/${id}`, query: { apply_to: "all" } }); console.log("cleanup deleted routine step", id); }
-      catch (e) { console.error("cleanup FAILED for routine step", id, e instanceof Error ? e.message : e); }
+    for (const id of [...choreSeries]) {
+      try {
+        await rt.client.request({ method: "DELETE", path: `${frame}/chores/${id}`, query: { apply_to: "all" } });
+        choreSeries.splice(choreSeries.indexOf(id), 1);
+        console.log("cleanup deleted routine step", id);
+      } catch (e) { console.error("cleanup FAILED for routine step", id, e instanceof Error ? e.message : e); }
     }
     try {
-      for (const e of await smokeEvents()) {
-        try { await rt.client.request({ method: "DELETE", path: `${frame}/calendar_events/${e.masterId}` }); console.log("cleanup deleted event", e.masterId); }
-        catch (err) { console.error("cleanup FAILED for event", e.masterId, err instanceof Error ? err.message : err); }
+      const rows = mapChores(await get("/chores", { after: addDays(today, -1), before: addDays(today, 14), include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" }));
+      leftovers.steps = rows.filter((c) => c.summary.startsWith(PREFIX)).length;
+    } catch (e) { console.error("routine step leftover check failed:", e instanceof Error ? e.message : e); leftovers.steps = -1; }
+    try {
+      for (const masterId of new Set((await smokeEvents()).map((e) => e.masterId))) {
+        try { await rt.client.request({ method: "DELETE", path: `${frame}/calendar_events/${masterId}` }); console.log("cleanup deleted event", masterId); }
+        catch (err) { console.error("cleanup FAILED for event", masterId, err instanceof Error ? err.message : err); }
       }
       leftovers.events = (await smokeEvents()).length;
     } catch (e) { console.error("event cleanup failed:", e instanceof Error ? e.message : e); leftovers.events = -1; }
@@ -260,10 +270,10 @@ export async function phase2Smoke(rt: Runtime, frameId: string, today: string): 
       }
     }
     await tools.close();
-    console.log(`phase 2 leftovers: rewards ${leftovers.rewards}, lists ${leftovers.lists}, events ${leftovers.events}`);
+    console.log(`phase 2 leftovers: rewards ${leftovers.rewards}, lists ${leftovers.lists}, events ${leftovers.events}, routine steps ${leftovers.steps}`);
   }
-  if (leftovers.rewards !== 0 || leftovers.lists !== 0 || leftovers.events !== 0) {
-    throw new Error(`phase 2 smoke left objects behind (rewards ${leftovers.rewards}, lists ${leftovers.lists}, events ${leftovers.events}; -1 means the check itself failed). Delete the "${PREFIX}" items in the Skylight app.`);
+  if (leftovers.rewards !== 0 || leftovers.lists !== 0 || leftovers.events !== 0 || leftovers.steps !== 0) {
+    throw new Error(`phase 2 smoke left objects behind (rewards ${leftovers.rewards}, lists ${leftovers.lists}, events ${leftovers.events}, routine steps ${leftovers.steps}; -1 means the check itself failed). Delete the "${PREFIX}" items in the Skylight app.`);
   }
   console.log(`phase 2 write smoke OK (${steps.join("; ")})`);
 }
