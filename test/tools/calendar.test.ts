@@ -420,3 +420,94 @@ test("create event refuses a bare time inside the spring-forward gap, with no re
   assert.equal(writes(t).length, 0);
   await t.close();
 });
+
+const INVITE_CREATE = { title: "Birthday party", profileIds: ["12"], startsAt: "2026-10-20T15:00", invitedEmails: ["Grandma@Example.com", "uncle@example.com", "grandma@example.com"] };
+
+test("create event with invitedEmails and no confirmInvites previews the addresses and makes NO write", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: [ev("900", "Birthday party")] } }]);
+  const r = await t.callTool("skylight_create_event", INVITE_CREATE);
+  assert.equal(r.isError, false);
+  const d = r.data as { confirmed: boolean; wouldInvite: string[]; message: string; event: { title: string; startsAt: string } };
+  assert.equal(d.confirmed, false);
+  assert.deepEqual(d.wouldInvite, ["grandma@example.com", "uncle@example.com"]);
+  assert.match(d.message, /Skylight will email an invitation to each address/);
+  assert.match(d.message, /Nothing was created/);
+  assert.match(d.message, /confirmInvites: true/);
+  assert.deepEqual([d.event.title, d.event.startsAt], ["Birthday party", "2026-10-20T15:00:00-04:00"]);
+  assert.equal(writes(t).length, 0);
+  await t.close();
+});
+
+test("create event with invitedEmails and confirmInvites: true POSTs the de-duplicated, lower-cased addresses", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: [ev("900", "Birthday party")] } }]);
+  const r = await t.callTool("skylight_create_event", { ...INVITE_CREATE, confirmInvites: true });
+  assert.equal(r.isError, false);
+  assert.equal(writes(t).length, 1);
+  assert.deepEqual((writes(t)[0]!.body as { invited_emails: string[] }).invited_emails, ["grandma@example.com", "uncle@example.com"]);
+  assert.ok(!("confirmInvites" in (writes(t)[0]!.body as object)) && !("confirm_invites" in (writes(t)[0]!.body as object)));
+  await t.close();
+});
+
+test("create event without invitees (omitted or empty) sends invited_emails: [] and needs no confirmation", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: [ev("900", "x")] } }]);
+  await t.callTool("skylight_create_event", { title: "A", profileIds: ["12"], startsAt: "2026-10-20T15:00" });
+  await t.callTool("skylight_create_event", { title: "B", profileIds: ["12"], startsAt: "2026-10-20T15:00", invitedEmails: [] });
+  assert.deepEqual(writes(t).map((c) => (c.body as { invited_emails: string[] }).invited_emails), [[], []]);
+  await t.close();
+});
+
+test("create event validates invitedEmails before any request, including in the preview path", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: [ev("900", "x")] } }]);
+  const base = { title: "A", profileIds: ["12"], startsAt: "2026-10-20T15:00" };
+  for (const invitedEmails of [["not-an-email"], ["a@b"], Array.from({ length: 21 }, (_, i) => `u${i}@example.com`), ["ok@example.com", ""]]) {
+    assert.equal((await t.callTool("skylight_create_event", { ...base, invitedEmails })).isError, true, JSON.stringify(invitedEmails).slice(0, 50));
+    assert.equal((await t.callTool("skylight_create_event", { ...base, invitedEmails, confirmInvites: true })).isError, true);
+  }
+  assert.equal(t.calls.length, 0);
+  assert.equal((await t.callTool("skylight_create_event", { ...base, invitedEmails: Array.from({ length: 20 }, (_, i) => `u${i}@example.com`) })).isError, false, "20 is allowed (as a preview)");
+  await t.close();
+});
+
+test("update event with invitedEmails previews without confirmInvites (no PUT), and PUTs invited_emails with it", async () => {
+  const t = await connectTestClient([FRAMES, lookupRoute([ev("900", "Dentist")]), { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "Dentist") } }]);
+  const preview = await t.callTool("skylight_update_event", { eventId: "900", invitedEmails: ["Kid@Example.com"] });
+  const d = preview.data as { confirmed: boolean; wouldInvite: string[]; message: string };
+  assert.equal(d.confirmed, false);
+  assert.deepEqual(d.wouldInvite, ["kid@example.com"]);
+  assert.match(d.message, /Skylight will email an invitation to each address/);
+  assert.match(d.message, /Nothing was changed/);
+  assert.equal(writes(t).length, 0);
+  const done = await t.callTool("skylight_update_event", { eventId: "900", title: "Dentist 2", invitedEmails: ["Kid@Example.com"], confirmInvites: true });
+  assert.equal(done.isError, false);
+  assert.deepEqual(writes(t)[0]!.body, { summary: "Dentist 2", invited_emails: ["kid@example.com"] });
+  await t.close();
+});
+
+test("update event does not invite anyone for an empty list, and refuses a synced event even when previewing invites", async () => {
+  const t = await connectTestClient([FRAMES, lookupRoute([ev("900", "Dentist")]), { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "Dentist") } }]);
+  const r = await t.callTool("skylight_update_event", { eventId: "900", title: "Dentist 2", invitedEmails: [] });
+  assert.equal(r.isError, false);
+  assert.deepEqual(writes(t)[0]!.body, { summary: "Dentist 2" });
+  assert.equal((await t.callTool("skylight_update_event", { eventId: "900", invitedEmails: [] })).isError, true, "an empty list alone is no change");
+  assert.equal((await t.callTool("skylight_update_event", { eventId: "900", invitedEmails: ["bad"] })).isError, true);
+  await t.close();
+  const t2 = await connectTestClient([FRAMES, lookupRoute([synced]), { method: "PUT", path: /\/calendar_events\//, json: {} }]);
+  const refused = await t2.callTool("skylight_update_event", { eventId: "11019627806-1791803100", invitedEmails: ["a@example.com"] });
+  assert.equal(refused.isError, true);
+  assert.match(refused.text, /synced google calendar/);
+  assert.equal(writes(t2).length, 0);
+  await t2.close();
+});
+
+test("the event tools describe invitations as emailing people, while keeping their annotations", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const tools = new Map((await t.client.listTools()).tools.map((x) => [x.name, x]));
+  for (const name of ["skylight_create_event", "skylight_update_event"]) {
+    const description = tools.get(name)!.description ?? "";
+    assert.match(description, /invitedEmails/);
+    assert.match(description, /confirmInvites: true/);
+    assert.match(description, /email/i);
+    assert.equal(tools.get(name)!.annotations!.openWorldHint, false, "annotations are unchanged");
+  }
+  await t.close();
+});

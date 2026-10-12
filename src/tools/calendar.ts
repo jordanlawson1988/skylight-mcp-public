@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { buildEventCreateBody, buildEventUpdateBody, MAX_EVENT_TITLE_LENGTH, MAX_LOCATION_LENGTH, type EventFields } from "../skylight/event-payload.js";
+import { buildEventCreateBody, buildEventUpdateBody, MAX_EVENT_INVITEES, MAX_EVENT_TITLE_LENGTH, MAX_LOCATION_LENGTH, type EventFields } from "../skylight/event-payload.js";
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertId, parseEventId, type EventRef } from "../skylight/ids.js";
 import { mapEvent, mapEvents, type CalendarEvent } from "../skylight/types.js";
@@ -101,7 +101,21 @@ const eventFieldShape = (tz: string) => ({
   description: z.string().optional().describe("Notes, up to 500 characters."),
   emoji: z.string().optional().describe("Single emoji icon."),
   countdown: z.boolean().optional().describe("Show a countdown to the event on the Skylight display. Default false."),
+  invitedEmails: z.array(z.string()).max(MAX_EVENT_INVITEES).optional().describe(`Email addresses to invite (up to ${MAX_EVENT_INVITEES}); Skylight emails each one an invitation. Needs confirmInvites: true.`),
+  confirmInvites: z.boolean().optional().describe("Must be true when invitedEmails is not empty, because Skylight then emails real people. Ask the user first."),
 });
+
+const INVITE_NOTE = `invitedEmails (up to ${MAX_EVENT_INVITEES} addresses) makes Skylight email an invitation to each address, which reaches people outside the family, so it also needs confirmInvites: true: without it the call makes NO change and returns the addresses it would invite. Show that to the user and only call again with confirmInvites: true after they agree.`;
+
+/** The no-write answer when invitees were given but not confirmed. */
+function invitePreview(emails: readonly string[], what: "created" | "changed", extra: Record<string, unknown>) {
+  return {
+    confirmed: false,
+    wouldInvite: emails,
+    ...extra,
+    message: `Nothing was ${what}. Skylight will email an invitation to each address: ${emails.join(", ")}. Ask the user to confirm, then call again with confirmInvites: true.`,
+  };
+}
 
 const deleteScope = z.enum(EXPOSED_APPLY_TO_VALUES as [string, ...string[]]).optional()
   .describe("\"one\" = only this occurrence, \"future\" = this occurrence and all later ones (both need an occurrence id), \"all\" = the whole series (sent as a delete of the master id). Omit for a one-off event or to delete a whole series by its plain id.");
@@ -138,7 +152,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
     "skylight_create_event",
     {
       title: "Create a calendar event",
-      description: `Create one calendar event. Timed events take startsAt as YYYY-MM-DDTHH:mm, read as ${zoneLabel(tz)} unless you add an explicit offset (e.g. 2026-10-12T18:30:00-04:00 or ...Z); the tool converts it to an explicit offset itself, so just give the local time the user said. The end defaults to one hour later. All-day events use allDay: true with startDate (and endDate for several days). profileIds may be people or labels such as Birthdays. Add recurrence for a repeating event. Not idempotent: repeating the call creates a duplicate.`,
+      description: `Create one calendar event. Timed events take startsAt as YYYY-MM-DDTHH:mm, read as ${zoneLabel(tz)} unless you add an explicit offset (e.g. 2026-10-12T18:30:00-04:00 or ...Z); the tool converts it to an explicit offset itself, so just give the local time the user said. The end defaults to one hour later. All-day events use allDay: true with startDate (and endDate for several days). profileIds may be people or labels such as Birthdays. Add recurrence for a repeating event. ${INVITE_NOTE} Not idempotent: repeating the call creates a duplicate.`,
       inputSchema: {
         title: z.string().describe(`Event title, up to ${MAX_EVENT_TITLE_LENGTH} characters.`),
         profileIds: z.array(z.string()).min(1).max(20).describe("Profile or label ids from skylight_list_profiles."),
@@ -147,9 +161,13 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       annotations: ANNOTATIONS.create,
     },
     (args) => run(async () => {
-      const body = buildEventCreateBody(args as EventFields, tz);
+      const { confirmInvites, ...fields } = args;
+      const body = buildEventCreateBody(fields as EventFields, tz);
       const frameId = await ctx.frames.resolve();
       await assertProfilesExist(ctx, frameId, body.category_ids, "profileIds");
+      if (body.invited_emails.length > 0 && confirmInvites !== true) {
+        return invitePreview(body.invited_emails, "created", { event: { title: body.summary, startsAt: body.starts_at, endsAt: body.ends_at, allDay: body.all_day } });
+      }
       const events = eventsFrom(await ctx.client.request<unknown>({ method: "POST", path: eventsPath(frameId), body }));
       return { created: events.length, events: events.map((e) => presentEvent(e, tz)), ...(events.length === 0 ? { warning: "Skylight returned no event; call skylight_list_events to confirm before retrying." } : {}) };
     })
@@ -159,7 +177,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
     "skylight_update_event",
     {
       title: "Update a calendar event",
-      description: `Change fields on an event created in Skylight. Only the provided fields change. Datetimes are read as ${zoneLabel(tz)} unless you add an explicit offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited, and an occurrence id with no applyTo still updates the whole series through its master id. Events synced from Google or another calendar are refused: change them there.`,
+      description: `Change fields on an event created in Skylight. Only the provided fields change. Datetimes are read as ${zoneLabel(tz)} unless you add an explicit offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited, and an occurrence id with no applyTo still updates the whole series through its master id. Events synced from Google or another calendar are refused: change them there. ${INVITE_NOTE}`,
       inputSchema: {
         eventId: eventIdSchema,
         title: z.string().optional().describe(`New title, up to ${MAX_EVENT_TITLE_LENGTH} characters.`),
@@ -170,13 +188,16 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       annotations: ANNOTATIONS.update,
     },
     (args) => run(async () => {
-      const { eventId, applyTo, ...rest } = args;
+      const { eventId, applyTo, confirmInvites, ...rest } = args;
       const ref = parseEventId(eventId, "eventId");
-      const body: Record<string, unknown> = buildEventUpdateBody(rest as EventFields, tz);
+      const built = buildEventUpdateBody(rest as EventFields, tz);
+      const invited = built.invited_emails ?? [];
+      const body: Record<string, unknown> = built;
       if (applyTo !== undefined) body.apply_to = applyTo;
       const frameId = await ctx.frames.resolve();
       if (Array.isArray(body.category_ids)) await assertProfilesExist(ctx, frameId, body.category_ids as string[], "profileIds");
       assertOwnEvent(await lookupEvent(ctx, frameId, ref, eventId));
+      if (invited.length > 0 && confirmInvites !== true) return invitePreview(invited, "changed", { eventId });
       const json = await ctx.client.request<unknown>({ method: "PUT", path: `${eventsPath(frameId)}/${ref.masterId}`, body });
       const updated = eventsFrom(json)[0];
       return updated ? presentEvent(updated, tz) : { id: ref.masterId, updated: true };

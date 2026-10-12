@@ -1,12 +1,13 @@
 import { ValidationError } from "./errors.js";
 import { assertProfileIds, MAX_DESCRIPTION_LENGTH } from "./chore-payload.js";
-import { assertDate, assertEmoji, cleanText } from "./ids.js";
+import { assertDate, assertEmails, assertEmoji, cleanText } from "./ids.js";
 import { buildRrule, type Recurrence } from "./rrule.js";
 import { toOffsetDateTime } from "./time.js";
 import { EVENT_KIND } from "./vocab.js";
 
 export const MAX_EVENT_TITLE_LENGTH = 200;
 export const MAX_LOCATION_LENGTH = 200;
+export const MAX_EVENT_INVITEES = 20;
 const HOUR_MS = 3_600_000;
 
 export interface EventFields {
@@ -23,6 +24,8 @@ export interface EventFields {
   description?: string | undefined;
   emoji?: string | undefined;
   countdown?: boolean | undefined;
+  /** Addresses Skylight emails an invitation to. */
+  invitedEmails?: string[] | undefined;
 }
 
 export interface EventCreateBody {
@@ -45,7 +48,7 @@ export interface EventCreateBody {
   countdown_enabled: boolean;
 }
 
-export type EventUpdateBody = Partial<Pick<EventCreateBody, "summary" | "category_ids" | "starts_at" | "ends_at" | "all_day" | "rrule" | "location" | "description" | "emoji_icon" | "timezone" | "countdown_enabled">>;
+export type EventUpdateBody = Partial<Pick<EventCreateBody, "summary" | "category_ids" | "starts_at" | "ends_at" | "all_day" | "rrule" | "invited_emails" | "location" | "description" | "emoji_icon" | "timezone" | "countdown_enabled">>;
 
 /** IANA zone name such as "America/New_York" (anything Intl accepts). */
 export function assertTimezone(value: string, field: string): string {
@@ -122,7 +125,7 @@ export function buildEventCreateBody(input: EventFields, tz: string): EventCreat
     ends_at: endsAt,
     all_day: allDay,
     rrule: input.recurrence === undefined ? null : rruleOf(input.recurrence),
-    invited_emails: [],
+    invited_emails: input.invitedEmails === undefined ? [] : assertEmails(input.invitedEmails, "invitedEmails", MAX_EVENT_INVITEES),
     location: text.location ?? null,
     lat: null,
     lng: null,
@@ -163,6 +166,11 @@ export function buildEventUpdateBody(input: EventFields, tz: string): EventUpdat
   if (input.recurrence !== undefined) out.rrule = rruleOf(input.recurrence);
   if (input.timezone !== undefined) out.timezone = assertTimezone(input.timezone, "timezone");
   if (input.countdown !== undefined) out.countdown_enabled = input.countdown;
+  // An empty list is "no one to invite", never "remove the invitees": it is validated but not sent.
+  if (input.invitedEmails !== undefined) {
+    const invited = assertEmails(input.invitedEmails, "invitedEmails", MAX_EVENT_INVITEES);
+    if (invited.length > 0) out.invited_emails = invited;
+  }
   if (Object.keys(out).length === 0) throw new ValidationError("update", "provide at least one field to change");
   return out;
 }
