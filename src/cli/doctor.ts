@@ -14,6 +14,12 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
     else lines.push(`Login:      not logged in. Run: skylight-mcp login`);
   } else {
     lines.push(`Login:      Logged in (token valid until ${s.tokenExpiresAt})`);
+    try {
+      const frames = await rt.frames.list();
+      lines.push(`Frames:     ${frames.map((f) => `${f.id}${f.name ? ` (${f.name})` : ""}`).join(", ") || "none found"}`);
+    } catch (e) {
+      lines.push(`Frames:     could not load: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (s.frameId) lines.push(`Frame:      ${s.frameId}`);
     else lines.push(`Frame:      ${s.frameError ?? "unresolved"}`);
     if (s.frameId) {
@@ -27,7 +33,7 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
   }
   const env: Record<string, string> = {};
   if (rt.config.frameId) env.SKYLIGHT_FRAME_ID = rt.config.frameId;
-  const config = { mcpServers: { skylight: { command: "node", args: [serverPath], ...(Object.keys(env).length ? { env } : {}) } } };
+  const config = { mcpServers: { skylight: { command: process.execPath, args: [serverPath], ...(Object.keys(env).length ? { env } : {}) } } };
   lines.push(``, `Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):`, ``, JSON.stringify(config, null, 2), ``);
   return `${lines.join("\n")}\n`;
 }

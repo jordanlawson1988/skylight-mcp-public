@@ -24,35 +24,36 @@ git clone https://github.com/jordanlawson1988/skylight-mcp
 cd skylight-mcp
 npm install
 npm run build
+npm link
 ```
 
-Then run the CLI with `node dist/cli.js <command>`. Commands: `login`, `logout`, `status`, `doctor`.
+`npm link` makes the `skylight-mcp` command available on your PATH. Commands: `login`, `logout`, `status`, `doctor`. Without linking, `node dist/cli.js <command>` does the same thing.
 
 ## Login
 
 ```sh
-node dist/cli.js login
+skylight-mcp login
 ```
 
 The command prints a link to Skylight's authorize page. Open it in a browser. The page needs Skylight's own server-side sign-in, not the session from the Skylight web app, so you may be asked to sign in even if the web app is already open. After you sign in, the browser lands on `https://ourskylight.com/welcome?code=...`. Copy the full address from the address bar and paste it into the terminal prompt.
 
-You can also pass the URL on the command line with `--callback <url>`. If a login was started earlier and you only have the final URL, run `node dist/cli.js login --complete <url>` to finish it. `--pkce S256|plain` selects the PKCE method (default `S256`).
+If a login was started earlier and you only have the final URL, run `skylight-mcp login --complete <url>` to finish it. `--pkce S256|plain` selects the PKCE method (default `S256`).
 
-Check the result with `node dist/cli.js status`. It shows whether you are logged in, the API host, the token expiry and the frame in use.
+Check the result with `skylight-mcp status`. It shows whether you are logged in, the API host, the token expiry and the frame in use.
 
 ## Claude Desktop setup
 
 ```sh
-node dist/cli.js doctor
+skylight-mcp doctor
 ```
 
-`doctor` prints your login status, the profiles it can see, and a ready-made config block with the absolute path to `dist/server.js`. Paste that block into `~/Library/Application Support/Claude/claude_desktop_config.json`, merging it with any existing `mcpServers` entries, then restart Claude Desktop. It looks like this:
+`doctor` prints your login status, the profiles it can see, and a ready-made config block with the absolute paths to your `node` binary and to `dist/server.js`. Paste that block into `~/Library/Application Support/Claude/claude_desktop_config.json`, merging it with any existing `mcpServers` entries, then restart Claude Desktop. It looks like this:
 
 ```json
 {
   "mcpServers": {
     "skylight": {
-      "command": "node",
+      "command": "/absolute/path/to/node",
       "args": ["/absolute/path/to/skylight-mcp/dist/server.js"]
     }
   }
@@ -84,6 +85,8 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 - "Add a morning routine for Ellie starting tomorrow: brush teeth at 7:00, get dressed at 7:10, pack backpack at 7:20. Run it as a dry run first and show me the payloads."
 
 ## Development
+
+Use `skylight-mcp ...` as above, or `node dist/cli.js ...` without linking.
 
 ```sh
 npm run check        # typecheck, tests and build

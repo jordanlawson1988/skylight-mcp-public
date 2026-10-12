@@ -20,7 +20,9 @@ test("doctor prints status, profiles and a Claude Desktop config block", async (
   out = await doctor(rt, { serverPath: "/abs/dist/server.js" });
   assert.match(out, /Logged in/);
   assert.match(out, /Ellie \(12\)/);
-  assert.match(out, /"command": "node"/);
+  assert.ok(out.includes(`"command": ${JSON.stringify(process.execPath)}`));
+  assert.match(process.execPath, /node(\.exe)?$/);
+  assert.match(out, /Frames:\s+77 \(L\)/);
   assert.match(out, /\/abs\/dist\/server\.js/);
   assert.ok(!out.includes("AT"));
   await cleanup();

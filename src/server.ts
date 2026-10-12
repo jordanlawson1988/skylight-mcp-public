@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { assertMacOS, createRuntime } from "./runtime.js";
 import type { ToolContext } from "./tools/context.js";
@@ -23,7 +24,17 @@ async function main(): Promise<void> {
   process.stderr.write(`[skylight-mcp] ${VERSION} ready on stdio\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isDirectRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+if (isDirectRun()) {
   main().catch((e) => {
     process.stderr.write(`[skylight-mcp] fatal: ${e instanceof Error ? e.message : String(e)}\n`);
     process.exit(1);
