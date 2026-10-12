@@ -30,7 +30,7 @@ test("login start writes pending file; complete exchanges, stores, clears pendin
   assert.ok(r.expiresAt > Date.now());
   assert.equal((await runtime.store.read())!.accessToken, "AT");
   assert.equal(await runtime.store.readPendingLogin(), null);
-  assert.equal((calls[0]!.body as Record<string, string>).code_verifier.length >= 43, true);
+  assert.equal((calls[0]!.body as Record<string, string>).code_verifier!.length >= 43, true);
   await cleanup();
 });
 

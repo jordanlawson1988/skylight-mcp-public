@@ -136,7 +136,7 @@ test("error excerpt is at most 500 characters", async () => {
 
 test("token request is sent with redirect: error", async () => {
   const p = createPendingLogin();
-  let redirect: RequestRedirect | undefined;
+  let redirect: RequestInit["redirect"];
   const { fetch } = createMockFetch([
     { method: "POST", path: "/oauth/token", handler: ({ init }) => { redirect = init.redirect; return { json: { access_token: "A", refresh_token: "R", expires_in: 10 } }; } },
   ]);
