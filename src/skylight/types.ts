@@ -1,6 +1,7 @@
 import { ID_PATTERN, parseChoreId, type ChoreRef } from "./ids.js";
+import { kindFromLinked, type ProfileKind } from "./vocab.js";
 
-export interface Profile { id: string; name: string; color: string | null; linkedToProfile: boolean | null; onChoreChart: boolean | null }
+export interface Profile { id: string; name: string; color: string | null; kind: ProfileKind | null; onChoreChart: boolean | null }
 export interface Chore {
   id: string; summary: string; start: string | null; startTime: string | null; status: string | null;
   routine: boolean; recurring: boolean; recurrenceRule: string | null; rewardPoints: number | null; emoji: string | null; profileIds: string[];
@@ -39,16 +40,17 @@ function relationshipIds(resource: Rec): string[] {
   return out;
 }
 
+export function mapProfile(resource: unknown): Profile | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const name = str(a.label) ?? str(a.name);
+  if (!id || !name) return null;
+  return { id, name, color: str(a.color), kind: kindFromLinked(bool(a.linked_to_profile)), onChoreChart: bool(a.selected_for_chore_chart) };
+}
+
 export function mapProfiles(json: unknown): Profile[] {
-  const out: Profile[] = [];
-  for (const r of dataArray(json)) {
-    const id = idOf(r.id);
-    const a = rec(r.attributes);
-    const name = str(a.label) ?? str(a.name);
-    if (!id || !name) continue;
-    out.push({ id, name, color: str(a.color), linkedToProfile: bool(a.linked_to_profile), onChoreChart: bool(a.selected_for_chore_chart) });
-  }
-  return out;
+  return dataArray(json).map(mapProfile).filter((p): p is Profile => p !== null);
 }
 
 export function mapChore(resource: unknown): Chore | null {

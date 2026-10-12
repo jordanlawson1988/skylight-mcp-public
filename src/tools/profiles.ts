@@ -13,7 +13,7 @@ export function registerProfileTools(server: McpServer, ctx: ToolContext): void 
     "skylight_list_profiles",
     {
       title: "List family profiles",
-      description: "List the family member profiles on the Skylight frame with their ids. Chores and reward points are assigned by profile id, so call this first when the user names a person. Categories such as Birthdays are listed too; people have linkedToProfile: true. Skylight exposes no adult/child flag.",
+      description: "List the family member profiles on the Skylight frame with their ids. Chores and reward points are assigned by profile id, so call this first when the user names a person. Categories such as Birthdays are listed too; people have kind: \"profile\" and calendar categories kind: \"label\". Skylight exposes no adult/child flag.",
       inputSchema: {},
       annotations: ANNOTATIONS.read,
     },

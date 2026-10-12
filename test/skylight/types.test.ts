@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapProfiles, mapChores, mapRewardPoints, mapRewards } from "../../src/skylight/types.js";
+import { mapProfile, mapProfiles, mapChores, mapRewardPoints, mapRewards } from "../../src/skylight/types.js";
 
 test("mapProfiles reads JSON:API categories", () => {
   const out = mapProfiles({ data: [
@@ -8,9 +8,17 @@ test("mapProfiles reads JSON:API categories", () => {
     { id: 13, type: "category", attributes: { name: "Birthdays", color: null, linked_to_profile: false } },
   ] });
   assert.deepEqual(out, [
-    { id: "12", name: "Ellie", color: "#ff0000", linkedToProfile: true, onChoreChart: true },
-    { id: "13", name: "Birthdays", color: null, linkedToProfile: false, onChoreChart: null },
+    { id: "12", name: "Ellie", color: "#ff0000", kind: "profile", onChoreChart: true },
+    { id: "13", name: "Birthdays", color: null, kind: "label", onChoreChart: null },
   ]);
+});
+
+test("mapProfile maps one resource and kind reflects linked_to_profile true/false/missing", () => {
+  assert.equal(mapProfile({ id: "1", attributes: { label: "A", linked_to_profile: true } })!.kind, "profile");
+  assert.equal(mapProfile({ id: "1", attributes: { label: "A", linked_to_profile: false } })!.kind, "label");
+  assert.equal(mapProfile({ id: "1", attributes: { label: "A" } })!.kind, null);
+  assert.equal(mapProfile({ attributes: { label: "A" } }), null);
+  assert.equal(mapProfile(null), null);
 });
 
 test("mapChores flattens attributes and category relationships", () => {

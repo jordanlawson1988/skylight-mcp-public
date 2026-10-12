@@ -17,7 +17,7 @@ Nothing is guaranteed by Skylight.
 - `GET /api/frames/calendar` → `{ data: [{ id, attributes: { name?, household_name? } }] }`
 - Profiles are categories: `GET /api/frames/{frameId}/categories`.
   Attribute names used by the web app: `label` (display name), `color`, `emoji`,
-  `selected_for_chore_chart`, `linked_to_profile`, `profile_picture_urls`. Verified live 2026-10-12: there is no adult/child flag at all, so the tool exposes `linkedToProfile` and `onChoreChart` instead.
+  `selected_for_chore_chart`, `linked_to_profile`, `profile_picture_urls`. Verified live 2026-10-12: there is no adult/child flag at all, so the tool exposes `kind` ("profile" when `linked_to_profile` is true, "label" otherwise) and `onChoreChart` instead.
 
 ## Chores and routines
 
