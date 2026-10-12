@@ -1,11 +1,11 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { AuthError } from "./errors.js";
+import { excerpt } from "./redact.js";
 
 export const CLIENT_ID = "skylight-mobile";
 export const REDIRECT_URI = "https://ourskylight.com/welcome";
 export const SCOPE = "everything";
 export const PENDING_LOGIN_TTL_MS = 600_000;
-const MAX_EXCERPT = 500;
 
 export type PkceMethod = "S256" | "plain";
 
@@ -98,20 +98,6 @@ export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now
   return { code };
 }
 
-const TOKEN_VALUE = /("(?:access_token|refresh_token)"\s*:\s*)"(?:[^"\\]|\\.)*"/g;
-
-function excerpt(text: string, secrets: readonly string[] = []): string {
-  let out = text.replace(TOKEN_VALUE, '$1"[redacted]"');
-  for (const secret of secrets) {
-    if (!secret) continue;
-    for (const variant of new Set([secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)])) {
-      out = out.split(variant).join("[redacted]");
-    }
-  }
-  const clean = out.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").trim();
-  return clean.length > MAX_EXCERPT ? `${clean.slice(0, MAX_EXCERPT - 1)}…` : clean;
-}
-
 function toCredential(json: unknown, fingerprint: string, fallbackRefreshToken?: string): OAuthCredential {
   const r = (json ?? {}) as Record<string, unknown>;
   if (typeof r.access_token !== "string" || r.access_token.length === 0) throw new AuthError("Skylight token response had no access token.");
@@ -144,7 +130,13 @@ async function tokenRequest(opts: {
       signal: controller.signal,
     });
     const text = await res.text();
-    if (!res.ok) throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text, opts.secrets)}`);
+    if (!res.ok) {
+      if (opts.what === "token refresh") {
+        if (res.status === 400 || res.status === 401) throw new AuthError("Your Skylight session expired or was revoked. Run `skylight-mcp login` again.");
+        throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text, opts.secrets)} Run \`skylight-mcp login\` if this persists.`);
+      }
+      throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text, opts.secrets)}`);
+    }
     let json: unknown;
     try { json = JSON.parse(text); } catch { throw new AuthError(`Skylight ${opts.what} returned invalid JSON.`); }
     return toCredential(json, opts.fingerprint, opts.fallbackRefreshToken);

@@ -24,6 +24,7 @@ export function logout(rt: Runtime): Promise<boolean> {
 
 export interface StatusReport {
   loggedIn: boolean;
+  needsLogin: boolean;
   apiHost: string;
   tokenExpiresAt: string | null;
   frameId: string | null;
@@ -37,11 +38,17 @@ export async function status(rt: Runtime): Promise<StatusReport> {
   try {
     cred = await rt.store.read();
   } catch (e) {
-    return { loggedIn: false, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: e instanceof Error ? e.message : String(e) };
+    return { loggedIn: false, needsLogin: true, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: e instanceof Error ? e.message : String(e) };
   }
-  if (cred === null) return { loggedIn: false, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: null };
+  if (cred === null) return { loggedIn: false, needsLogin: true, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: null };
   let frameId: string | null = null;
   let frameError: string | null = null;
-  try { frameId = await rt.frames.resolve(); } catch (e) { frameError = e instanceof Error ? e.message : String(e); }
-  return { loggedIn: true, apiHost, tokenExpiresAt: new Date(cred.expiresAt).toISOString(), frameId, frameError, credentialError: null };
+  let needsLogin = false;
+  try {
+    frameId = await rt.frames.resolve();
+  } catch (e) {
+    frameError = e instanceof Error ? e.message : String(e);
+    needsLogin = e instanceof AuthError && e.message.includes("skylight-mcp login");
+  }
+  return { loggedIn: true, needsLogin, apiHost, tokenExpiresAt: new Date(cred.expiresAt).toISOString(), frameId, frameError, credentialError: null };
 }

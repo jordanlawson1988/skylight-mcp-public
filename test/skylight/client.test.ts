@@ -80,3 +80,25 @@ test("429 message includes retry-after hint", async () => {
   const client = createClient({ fetch, config, tokens: tokens(["AT"]) });
   await assert.rejects(client.request({ method: "GET", path: "/api/x" }), /retry after 7/i);
 });
+
+test("a 500 body echoing the bearer token does not leak it into the error message", async () => {
+  const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", status: 500, text: "request echo: authorization=Bearer SECRETTOKEN123 and SECRETTOKEN123" }]);
+  const client = createClient({ fetch, config, tokens: tokens(["SECRETTOKEN123"]) });
+  await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => {
+    assert.ok(e instanceof SkylightApiError);
+    assert.ok(!e.message.includes("SECRETTOKEN123"));
+    assert.match(e.message, /\[redacted\]/);
+    return true;
+  });
+});
+
+test("the refreshed token is also redacted after a 401 retry", async () => {
+  let n = 0;
+  const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", handler: () => (n++ === 0 ? { status: 401, text: "nope" } : { status: 500, text: "echo NEWTOKEN999 OLDTOKEN111" }) }]);
+  const client = createClient({ fetch, config, tokens: tokens(["OLDTOKEN111", "NEWTOKEN999"]) });
+  await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => {
+    assert.ok(e instanceof SkylightApiError);
+    assert.ok(!e.message.includes("NEWTOKEN999") && !e.message.includes("OLDTOKEN111"));
+    return true;
+  });
+});

@@ -191,3 +191,21 @@ test("non-finite expires_in is rejected", async () => {
     AuthError
   );
 });
+
+test("refresh rejected with 400 or 401 gives the login hint without the body", async () => {
+  for (const status of [400, 401]) {
+    const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status, text: '{"error":"invalid_grant","refresh_token":"RT"}' }]);
+    await assert.rejects(
+      refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: { version: 1, accessToken: "a", refreshToken: "RT", fingerprint: "f", expiresAt: 0 } }),
+      (e: unknown) => e instanceof AuthError && /expired or was revoked/.test(e.message) && /skylight-mcp login/.test(e.message) && !e.message.includes("invalid_grant")
+    );
+  }
+});
+
+test("other refresh failures append the login hint", async () => {
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status: 503, text: "down" }]);
+  await assert.rejects(
+    refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: { version: 1, accessToken: "a", refreshToken: "r", fingerprint: "f", expiresAt: 0 } }),
+    (e: unknown) => e instanceof AuthError && /\(503\): down/.test(e.message) && /skylight-mcp login/.test(e.message)
+  );
+});

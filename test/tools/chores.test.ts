@@ -84,6 +84,17 @@ test("bulk create: continues past a failed item", async () => {
   await t.close();
 });
 
+test("bulk create: error body echoing the bearer token is redacted in results", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/create_multiple", status: 500, text: 'debug authorization=Bearer AT {"access_token":"AT"}' }]);
+  const r = await t.callTool("skylight_bulk_create_chores", { chores: [{ summary: "A", start: "2026-10-13", profileIds: ["12"] }] });
+  const d = r.data as { results: Array<{ ok: boolean; error?: string }> };
+  assert.equal(d.results[0]!.ok, false);
+  assert.match(d.results[0]!.error!, /\[redacted\]/);
+  assert.doesNotMatch(d.results[0]!.error!, /Bearer AT/);
+  assert.doesNotMatch(r.text, /"access_token":"AT"/);
+  await t.close();
+});
+
 test("bulk create rejects more than 50 items before any request", async () => {
   const t = await connectTestClient([FRAMES]);
   const r = await t.callTool("skylight_bulk_create_chores", { chores: Array.from({ length: 51 }, () => ({ summary: "x", start: "2026-10-13", profileIds: ["12"] })) });

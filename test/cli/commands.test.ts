@@ -69,6 +69,25 @@ test("status surfaces credential read failures instead of reporting logged out",
   await cleanup();
 });
 
+test("status flags needsLogin when a refresh is rejected", async () => {
+  const { runtime, cleanup } = await rt([{ method: "POST", path: "/oauth/token", status: 400, text: '{"error":"invalid_grant"}' }]);
+  await runtime.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: Date.now() - 1000 });
+  const s = await status(runtime);
+  assert.equal(s.loggedIn, true);
+  assert.equal(s.needsLogin, true);
+  assert.equal(s.frameId, null);
+  assert.match(s.frameError ?? "", /skylight-mcp login/);
+  await cleanup();
+});
+
+test("status needsLogin is false when logged in and the frame resolves, true when logged out", async () => {
+  const { runtime, cleanup } = await rt([{ method: "GET", path: "/api/frames/calendar", json: { data: [{ id: "77" }] } }]);
+  assert.equal((await status(runtime)).needsLogin, true);
+  await runtime.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: Date.now() + 10_000_000 });
+  assert.equal((await status(runtime)).needsLogin, false);
+  await cleanup();
+});
+
 test("logout removes credential", async () => {
   const { runtime, cleanup } = await rt([]);
   assert.equal(await logout(runtime), false);

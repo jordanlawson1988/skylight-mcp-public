@@ -1,6 +1,7 @@
 import type { TokenProvider } from "./auth.js";
 import type { SkylightConfig } from "./config.js";
 import { AuthError, SkylightApiError, ValidationError } from "./errors.js";
+import { excerpt } from "./redact.js";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -15,13 +16,6 @@ export interface SkylightClient {
   request<T = unknown>(opts: RequestOptions): Promise<T>;
 }
 
-const MAX_EXCERPT = 500;
-
-export function excerpt(text: string): string {
-  const clean = text.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").replace(/\s+/g, " ").trim();
-  return clean.length > MAX_EXCERPT ? `${clean.slice(0, MAX_EXCERPT - 1)}…` : clean;
-}
-
 export function createClient(opts: { fetch: typeof globalThis.fetch; config: SkylightConfig; tokens: TokenProvider }): SkylightClient {
   const { config } = opts;
 
@@ -33,7 +27,7 @@ export function createClient(opts: { fetch: typeof globalThis.fetch; config: Sky
       return { res, text: await res.text() };
     } catch (e) {
       if (controller.signal.aborted) throw new SkylightApiError(0, init.method ?? "GET", new URL(url).pathname, `Request timed out after ${config.requestTimeoutMs}ms.`);
-      throw new SkylightApiError(0, init.method ?? "GET", new URL(url).pathname, `Network error: ${excerpt(e instanceof Error ? e.message : String(e))}`);
+      throw new SkylightApiError(0, init.method ?? "GET", new URL(url).pathname, `Network error: ${excerpt(e instanceof Error ? e.message : String(e), [token])}`);
     } finally {
       clearTimeout(timer);
     }
@@ -55,16 +49,18 @@ export function createClient(opts: { fetch: typeof globalThis.fetch; config: Sky
       }
 
       let token = await opts.tokens.getAccessToken();
+      const secrets = [token];
       let { res, text } = await send(url.toString(), init, token);
       if (res.status === 401) {
         token = await opts.tokens.refreshAfterRejection(token);
+        secrets.push(token);
         ({ res, text } = await send(url.toString(), init, token));
         if (res.status === 401) throw new AuthError("Skylight rejected the credentials after a refresh. Run `skylight-mcp login` again.");
       }
       if (!res.ok) {
         const retryAfter = res.headers.get("retry-after");
-        const hint = res.status === 429 && retryAfter ? ` Retry after ${excerpt(retryAfter)} seconds.` : "";
-        const body = excerpt(text);
+        const hint = res.status === 429 && retryAfter ? ` Retry after ${excerpt(retryAfter, secrets)} seconds.` : "";
+        const body = excerpt(text, secrets);
         throw new SkylightApiError(res.status, o.method, o.path, `Skylight returned ${res.status} for ${o.method} ${o.path}${body ? `: ${body}` : ""}.${hint}`);
       }
       if (text.trim().length === 0) return null as T;
