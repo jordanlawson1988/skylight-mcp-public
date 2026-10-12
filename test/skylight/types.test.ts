@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mapProfile, mapProfiles, mapChores, mapRewardPoints, mapRewards } from "../../src/skylight/types.js";
+import { mapProfile, mapProfiles, mapChores, mapRewardPoints, mapRewards, mapReward, mapRewardResponse, mapLists, mapList, mapListItems, mapEvents, mapEvent } from "../../src/skylight/types.js";
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url), "utf8"));
 
@@ -134,8 +134,8 @@ test("mapRewardPoints accepts string ids, a data wrapper, missing lifetime, and 
 test("mapRewards reads name, point_value and the other live attributes", () => {
   const out = mapRewards(fixture("rewards"));
   assert.deepEqual(out, [
-    { id: "7323341", title: "Reward 1", cost: 400, emoji: null, description: null, respawnOnRedemption: true, redeemedAt: null, profileIds: ["15057920"] },
-    { id: "7323221", title: "Reward 2", cost: 250, emoji: null, description: null, respawnOnRedemption: true, redeemedAt: null, profileIds: ["15057970"] },
+    { id: "7323341", title: "Reward 1", cost: 400, emoji: null, description: null, respawnOnRedemption: true, redeemedAt: null, profileId: "15057920", redeemed: false },
+    { id: "7323221", title: "Reward 2", cost: 250, emoji: null, description: null, respawnOnRedemption: true, redeemedAt: null, profileId: "15057970", redeemed: false },
   ]);
   const one = mapRewards({ data: [{ id: "5", attributes: { name: "Ice cream", point_value: 0, emoji_icon: "🍦", description: "Treat", respawn_on_redemption: false, redeemed_at: "2026-10-01T10:00:00Z" } }] })[0]!;
   assert.equal(one.cost, 0);
@@ -143,4 +143,68 @@ test("mapRewards reads name, point_value and the other live attributes", () => {
   assert.equal(one.respawnOnRedemption, false);
   assert.equal(one.redeemedAt, "2026-10-01T10:00:00Z");
   assert.equal(mapRewards({ data: [{ id: "6", attributes: { name: "No cost" } }] })[0]!.cost, null);
+});
+
+test("mapReward derives redeemed from redeemed_at and tolerates a missing category", () => {
+  const r = mapReward({ id: "5", attributes: { name: "Ice cream", point_value: 4, redeemed_at: "2026-10-01T10:00:00Z" }, relationships: { category: { data: { id: "12" } } } })!;
+  assert.deepEqual([r.redeemed, r.redeemedAt, r.profileId], [true, "2026-10-01T10:00:00Z", "12"]);
+  assert.equal(mapReward({ id: "6", attributes: { name: "x" } })!.profileId, null);
+  assert.equal(mapReward({ id: "6", attributes: {} }), null);
+  assert.equal(mapReward(null), null);
+});
+
+test("mapRewardResponse accepts a data array (create), a single resource (get/update/redeem) or nothing", () => {
+  const raw = fixture("rewards") as { data: unknown[] };
+  assert.equal(mapRewardResponse(raw).length, 2);
+  assert.deepEqual(mapRewardResponse({ data: raw.data[0] }).map((r) => r.id), ["7323341"]);
+  assert.deepEqual(mapRewardResponse(null), []);
+  assert.deepEqual(mapRewardResponse({}), []);
+});
+
+test("mapLists reads the live list fixture: kind, color, hide_on_device and the item count", () => {
+  const out = mapLists(fixture("lists"));
+  assert.deepEqual(out, [
+    { id: "4771333", title: "List 1", kind: "shopping", color: "#42D792", hiddenOnDevice: false, itemCount: 2 },
+    { id: "4771334", title: "List 2", kind: "to_do", color: "#A8D4D3", hiddenOnDevice: false, itemCount: 2 },
+  ]);
+});
+
+test("mapList tolerates a missing relationship and unknown kinds, and rejects resources without a label", () => {
+  assert.deepEqual(mapList({ id: "9", attributes: { label: "Misc", kind: "weird", hide_on_device: true } }), { id: "9", title: "Misc", kind: null, color: null, hiddenOnDevice: true, itemCount: 0 });
+  assert.equal(mapList({ id: "9", attributes: {} }), null);
+  assert.deepEqual(mapLists(null), []);
+});
+
+test("mapListItems maps status to done, keeps section and position", () => {
+  const out = mapListItems(fixture("list_items"));
+  assert.ok(out.length >= 1);
+  assert.deepEqual(out[0], { id: "112792712", title: "Item 1", done: true, section: null, position: 8 });
+  const mixed = mapListItems({ data: [
+    { id: "1", attributes: { label: "A", status: "pending", section: "Dairy", position: 2 } },
+    { id: "2", attributes: { label: "B", status: "completed", section: null, position: 1 } },
+    { id: "3", attributes: { status: "pending" } },
+  ] });
+  assert.deepEqual(mixed, [{ id: "1", title: "A", done: false, section: "Dairy", position: 2 }, { id: "2", title: "B", done: true, section: null, position: 1 }]);
+});
+
+test("mapEvents reads the live fixture: composite ids, source, rrule, category, offsets kept as returned", () => {
+  const out = mapEvents(fixture("calendar_events"));
+  assert.equal(out.length, 3);
+  assert.deepEqual(out[0], { id: "11019657225", masterId: "11019657225", title: "Event 1", startsAt: "2026-10-08T00:00:00.000Z", endsAt: "2026-10-13T00:00:00.000Z", allDay: true, timezone: null, recurring: false, recurrenceRule: null, location: null, description: null, emoji: null, profileIds: ["14515614"], source: "google", editable: true });
+  assert.equal(out[1]!.description, "Details");
+  const recurring = out[2]!;
+  assert.equal(recurring.id, "11019627806-1791803100");
+  assert.equal(recurring.masterId, "11019627806");
+  assert.equal(recurring.recurring, true);
+  assert.equal(recurring.recurrenceRule, "RRULE:FREQ=WEEKLY;WKST=SU;INTERVAL=1;BYDAY=MO,FR");
+  assert.equal(recurring.timezone, "America/New_York");
+  assert.deepEqual(recurring.profileIds, ["15057920"]);
+});
+
+test("mapEvent skips resources without an id or title and defaults editable/allDay", () => {
+  assert.equal(mapEvent({ attributes: { summary: "x" } }), null);
+  assert.equal(mapEvent({ id: "1", attributes: {} }), null);
+  const e = mapEvent({ id: "1", attributes: { summary: "x", starts_at: "2026-10-12T10:00:00.000-04:00", source: "skylight" } })!;
+  assert.deepEqual([e.allDay, e.editable, e.recurrenceRule, e.profileIds, e.source], [false, false, null, [], "skylight"]);
+  assert.deepEqual(mapEvents(null), []);
 });

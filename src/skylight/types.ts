@@ -1,6 +1,6 @@
-import { ID_PATTERN, parseChoreId, type ChoreRef } from "./ids.js";
+import { ID_PATTERN, parseChoreId, parseEventId, type ChoreRef } from "./ids.js";
 import { hourFromRrule } from "./rrule.js";
-import { kindFromLinked, slotFromHour, slotFromStartTime, type ProfileKind, type RoutineSlot } from "./vocab.js";
+import { LIST_ITEM_STATUS, LIST_KINDS, kindFromLinked, slotFromHour, slotFromStartTime, type ListKind, type ProfileKind, type RoutineSlot } from "./vocab.js";
 
 export interface Profile { id: string; name: string; color: string | null; kind: ProfileKind | null; onChoreChart: boolean | null }
 export interface Chore {
@@ -26,7 +26,21 @@ export interface Chore {
 export interface RewardPoints { profileId: string; points: number; lifetimePoints: number | null }
 export interface Reward {
   id: string; title: string; cost: number | null; emoji: string | null; description: string | null;
-  respawnOnRedemption: boolean | null; redeemedAt: string | null; profileIds: string[];
+  respawnOnRedemption: boolean | null; redeemedAt: string | null;
+  /** The profile (category) the reward belongs to; null if the response had none. */
+  profileId: string | null;
+  /** True when redeemedAt is set. */
+  redeemed: boolean;
+}
+export interface SkylightList { id: string; title: string; kind: ListKind | null; color: string | null; hiddenOnDevice: boolean; itemCount: number }
+export interface ListItem { id: string; title: string; done: boolean; section: string | null; position: number | null }
+export interface CalendarEvent {
+  /** As listed: a master/one-off id, or `<masterId>-<unixSeconds>` for one occurrence of a recurring event. */
+  id: string; masterId: string; title: string; startsAt: string | null; endsAt: string | null; allDay: boolean; timezone: string | null;
+  recurring: boolean; recurrenceRule: string | null; location: string | null; description: string | null; emoji: string | null;
+  profileIds: string[];
+  /** OWN_EVENT_SOURCE for our own events; anything else (a synced calendar such as Google) is read-only here. */
+  source: string | null; editable: boolean;
 }
 
 type Rec = Record<string, unknown>;
@@ -118,17 +132,78 @@ export function mapRewardPoints(json: unknown): RewardPoints[] {
   return out;
 }
 
+export function mapReward(resource: unknown): Reward | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const title = str(a.name);
+  if (!id || !title) return null;
+  const redeemedAt = str(a.redeemed_at);
+  return {
+    id, title, cost: num(a.point_value), emoji: str(a.emoji_icon), description: str(a.description),
+    respawnOnRedemption: bool(a.respawn_on_redemption), redeemedAt, profileId: relationshipIds(r)[0] ?? null, redeemed: redeemedAt !== null,
+  };
+}
+
 export function mapRewards(json: unknown): Reward[] {
-  const out: Reward[] = [];
-  for (const r of dataArray(json)) {
-    const id = idOf(r.id);
-    const a = rec(r.attributes);
-    const title = str(a.name);
-    if (!id || !title) continue;
-    out.push({
-      id, title, cost: num(a.point_value), emoji: str(a.emoji_icon), description: str(a.description),
-      respawnOnRedemption: bool(a.respawn_on_redemption), redeemedAt: str(a.redeemed_at), profileIds: relationshipIds(r),
-    });
-  }
-  return out;
+  return dataArray(json).map(mapReward).filter((r): r is Reward => r !== null);
+}
+
+/** Create answers with `{ data: [reward...] }`; get, update, redeem and unredeem may answer with a single `{ data: reward }`. */
+export function mapRewardResponse(json: unknown): Reward[] {
+  const data = rec(json).data;
+  if (Array.isArray(data)) return mapRewards(json);
+  const one = mapReward(data);
+  return one ? [one] : [];
+}
+
+export function mapList(resource: unknown): SkylightList | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const title = str(a.label);
+  if (!id || title === null) return null;
+  const kind = str(a.kind);
+  const items = rec(rec(r.relationships).list_items).data;
+  return {
+    id, title, kind: LIST_KINDS.find((k) => k === kind) ?? null, color: str(a.color), hiddenOnDevice: bool(a.hide_on_device) ?? false,
+    itemCount: Array.isArray(items) ? items.length : 0,
+  };
+}
+
+export function mapLists(json: unknown): SkylightList[] {
+  return dataArray(json).map(mapList).filter((l): l is SkylightList => l !== null);
+}
+
+export function mapListItem(resource: unknown): ListItem | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const title = str(a.label);
+  if (!id || title === null) return null;
+  return { id, title, done: str(a.status) === LIST_ITEM_STATUS.done, section: str(a.section), position: num(a.position) };
+}
+
+export function mapListItems(json: unknown): ListItem[] {
+  return dataArray(json).map(mapListItem).filter((i): i is ListItem => i !== null);
+}
+
+export function mapEvent(resource: unknown): CalendarEvent | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const title = str(a.summary);
+  if (!id || title === null) return null;
+  let masterId = id;
+  try { masterId = parseEventId(id, "id").masterId; } catch { /* keep the raw id */ }
+  const rrule = Array.isArray(a.rrule) ? str(a.rrule[0]) : str(a.rrule);
+  return {
+    id, masterId, title, startsAt: str(a.starts_at), endsAt: str(a.ends_at), allDay: bool(a.all_day) ?? false, timezone: str(a.timezone),
+    recurring: bool(a.recurring) ?? rrule !== null, recurrenceRule: rrule, location: str(a.location), description: str(a.description), emoji: str(a.emoji_icon),
+    profileIds: relationshipIds(r), source: str(a.source), editable: bool(a.editable) ?? false,
+  };
+}
+
+export function mapEvents(json: unknown): CalendarEvent[] {
+  return dataArray(json).map(mapEvent).filter((e): e is CalendarEvent => e !== null);
 }

@@ -31,3 +31,14 @@ export const slotFromStartTime = (startTime: string | null): RoutineSlot | null 
 };
 /** True for a calendar label such as Birthdays; false for a person or an unknown kind. */
 export const isLabelKind = (kind: ProfileKind | null): boolean => kind !== null && !linkedFromKind(kind);
+
+// Lists (verified live 2026-10-12): kind is one of three values; an item is "pending" or "completed".
+export const LIST_KINDS = ["to_do", "shopping", "other"] as const;
+export type ListKind = (typeof LIST_KINDS)[number];
+export const DEFAULT_LIST_KIND: ListKind = "to_do";
+export const LIST_ITEM_STATUS = { done: "completed", notDone: "pending" } as const;
+export const DEFAULT_LIST_COLOR = "#42D792";
+
+// Calendar events: `source` is "skylight" for events created here or in the app; anything else comes from a synced calendar (e.g. "google") and is read-only for us.
+export const OWN_EVENT_SOURCE = "skylight";
+export const EVENT_KIND = "standard";
