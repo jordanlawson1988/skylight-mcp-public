@@ -10,7 +10,8 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
   const s = await status(rt);
   lines.push(`API host:   ${s.apiHost}`);
   if (!s.loggedIn) {
-    lines.push(`Login:      not logged in. Run: skylight-mcp login`);
+    if (s.credentialError) lines.push(`Login:      credential problem: ${s.credentialError}`);
+    else lines.push(`Login:      not logged in. Run: skylight-mcp login`);
   } else {
     lines.push(`Login:      Logged in (token valid until ${s.tokenExpiresAt})`);
     if (s.frameId) lines.push(`Frame:      ${s.frameId}`);

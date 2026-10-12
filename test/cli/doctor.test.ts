@@ -25,3 +25,16 @@ test("doctor prints status, profiles and a Claude Desktop config block", async (
   assert.ok(!out.includes("AT"));
   await cleanup();
 });
+
+test("doctor reports a credential problem instead of plain not logged in", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner, items } = createFakeKeychain();
+  const { fetch } = createMockFetch([]);
+  const rt = createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir }, fetch, runner });
+  await rt.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: Date.now() + 10_000_000 });
+  for (const k of items.keys()) items.set(k, Buffer.alloc(32, 7).toString("base64"));
+  const out = await doctor(rt, { serverPath: "/abs/dist/server.js" });
+  assert.match(out, /credential problem/);
+  assert.doesNotMatch(out, /not logged in/i);
+  await cleanup();
+});

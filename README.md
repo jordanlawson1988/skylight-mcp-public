@@ -20,7 +20,7 @@ This is an unofficial project. It is not affiliated with or endorsed by Skylight
 The package is named `@jordanlawson/skylight-mcp` but it is not published to npm. Install from source. Node 20 or newer is required.
 
 ```sh
-git clone <this repository's URL>
+git clone https://github.com/jordanlawson1988/skylight-mcp
 cd skylight-mcp
 npm install
 npm run build
@@ -72,7 +72,7 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | `skylight_bulk_create_chores` | Creates up to 50 chores in one call. Validates all items first and supports `dryRun: true`. |
 | `skylight_update_chore` | Changes fields on an existing chore. Only the fields you pass change. `applyTo` currently accepts only `"all"`; per-occurrence scopes are not available yet. |
 | `skylight_delete_chore` | Deletes a chore. Returns a preview and changes nothing unless `confirm: true` is set. |
-| `skylight_complete_chore` | Marks one instance done (`complete`) or not done (`pending`) for a profile on a date. |
+| `skylight_complete_chore` | Marks one occurrence done for a profile on a date, or reverts it with `done: false`. |
 | `skylight_get_reward_points` | Shows the current point balance per profile. |
 | `skylight_add_reward_points` | Adds or subtracts points for one or more profiles. Negative values subtract. |
 | `skylight_list_rewards` | Lists the rewards the family has set up, with point cost and redemption state. |
