@@ -66,3 +66,9 @@ export function assertPoints(value: number, field: string): number {
   }
   return value;
 }
+
+/** "#RRGGBB" hex color, normalised to upper case. */
+export function assertHexColor(value: string, field: string): string {
+  if (typeof value !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value)) throw new ValidationError(field, "must be a hex color like #CB434C");
+  return value.toUpperCase();
+}
