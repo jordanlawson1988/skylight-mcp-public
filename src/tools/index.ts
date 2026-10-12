@@ -4,6 +4,7 @@ import { registerAuthTools } from "./auth.js";
 import { registerCalendarTools } from "./calendar.js";
 import type { ToolContext } from "./context.js";
 import { registerChoreTools } from "./chores.js";
+import { registerDeviceTools } from "./devices.js";
 import { registerListTools } from "./lists.js";
 import { registerMealTools } from "./meals.js";
 import { registerPhotoTools } from "./photos.js";
@@ -24,7 +25,7 @@ const REGISTRARS: Record<Toolset, Registrar> = {
   calendar: registerCalendarTools,
   meals: (server, ctx) => { registerMealTools(server, ctx); registerRecipeTools(server, ctx); },
   photos: registerPhotoTools,
-  devices: none,
+  devices: registerDeviceTools,
   frame: none,
   account: none,
 };
