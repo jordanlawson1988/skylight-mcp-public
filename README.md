@@ -8,7 +8,7 @@ This is an unofficial project. It is not affiliated with or endorsed by Skylight
 
 ## Safety
 
-- The tool set is narrow. There are no tools for accounts, devices, photos, calendar events, lists or meals. Never exposed: account delete or export, email or password change, frame transfer. Other areas are reserved for later phases, each destructive action confirm-gated. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can now be created, updated and deleted.
+- The tool set is narrow. There are no tools for accounts, devices, photos, calendar events, lists or meals. Never exposed: account delete or export, email or password change, frame transfer. Reserved for later phases, each destructive action confirm-gated. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can now be created, updated and deleted.
 - Deleting a chore requires `confirm: true`. Without it, `skylight_delete_chore` changes nothing and returns a preview of what would be deleted.
 - Deleting a profile works the same way: `skylight_delete_profile` needs `confirm: true`, and its preview shows the upcoming chore count and where chores and events would go. To retire a person without losing their events, use `skylight_update_profile` with `kind: "label"` (Skylight's "Convert to Label").
 - Bulk create validates every item before sending any request, supports `dryRun: true`, and stops early if Skylight rejects the login or rate limits the requests.
