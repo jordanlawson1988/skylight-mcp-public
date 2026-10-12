@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { connectTestClient } from "../helpers/test-server.js";
 import type { MockRoute, RecordedCall } from "../helpers/mock-fetch.js";
-import { localDateString } from "../../src/skylight/ids.js";
+import { addDays as shiftDay, todayIn } from "../../src/skylight/time.js";
 
 const FRAMES: MockRoute = { method: "GET", path: "/api/frames/calendar", json: { data: [{ id: "77" }] } };
 const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url), "utf8"));
 const CATEGORIES: MockRoute = { method: "GET", path: "/api/frames/77/categories", json: { data: [{ id: "12", attributes: { label: "Ellie", linked_to_profile: true } }, { id: "14", attributes: { label: "Birthdays", linked_to_profile: false } }] } };
 const EVENTS = "/api/frames/77/calendar_events";
 const writes = (t: { calls: RecordedCall[] }) => t.calls.filter((c) => c.method !== "GET");
-const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const addDays = shiftDay;
 const ev = (id: string, summary: string, over: Record<string, unknown> = {}, profile = "12") => ({
   id, type: "calendar_event",
   attributes: { summary, starts_at: "2026-10-12T22:30:00.000Z", ends_at: "2026-10-12T23:30:00.000Z", all_day: false, timezone: "America/New_York", recurring: false, rrule: null, source: "skylight", editable: true, ...over },
@@ -66,7 +66,7 @@ test("list events defaults to today through 7 days ahead and caps the span at 92
   const t = await connectTestClient([FRAMES, { method: "GET", path: EVENTS, json: { data: [] } }]);
   await t.callTool("skylight_list_events");
   const q = t.calls.at(-1)!.url.searchParams;
-  const today = localDateString();
+  const today = todayIn("America/New_York");
   assert.deepEqual([q.get("date_min"), q.get("date_max")], [today, addDays(today, 7)]);
   const n = t.calls.length;
   assert.equal((await t.callTool("skylight_list_events", { after: "2026-01-01", before: "2026-04-03" })).isError, false); // exactly 92 days
@@ -210,7 +210,7 @@ test("update event PUTs the master id with only the provided fields and apply_to
   assert.deepEqual(writes(t)[0]!.body, { summary: "Dentist 2", starts_at: "2026-10-12T19:00:00-04:00", ends_at: "2026-10-12T20:00:00-04:00", all_day: false, location: "Elm St", apply_to: "all" });
   // the lookup covers a year either side of today
   const q = t.calls.find((c) => c.method === "GET" && c.url.pathname === EVENTS)!.url.searchParams;
-  const today = localDateString();
+  const today = todayIn("America/New_York");
   assert.deepEqual([q.get("date_min"), q.get("date_max")], [addDays(today, -365), addDays(today, 365)]);
   assert.equal((r.data as { title: string }).title, "Dentist 2");
   await t.close();
@@ -392,5 +392,31 @@ test("update event converts a bare startsAt to an explicit Eastern offset", asyn
   const t = await connectTestClient([FRAMES, CATEGORIES, lookupRoute([]), { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }]);
   await t.callTool("skylight_update_event", { eventId: "900", startsAt: "2026-07-12T09:00", endsAt: "2026-07-12T10:00" });
   assert.deepEqual(writes(t)[0]!.body, { starts_at: "2026-07-12T09:00:00-04:00", ends_at: "2026-07-12T10:00:00-04:00", all_day: false });
+  await t.close();
+});
+
+test("'today' comes from the configured zone and the injected clock, not UTC or the process zone", async () => {
+  // 23:30 UTC on Oct 12 is already Oct 13 12:30 in Auckland.
+  const now = () => new Date("2026-10-12T23:30:00Z");
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "GET", path: EVENTS, json: { data: [] } }, { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }], { env: { SKYLIGHT_TIMEZONE: "Pacific/Auckland" }, now });
+  await t.callTool("skylight_list_events");
+  let q = t.calls.at(-1)!.url.searchParams;
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-13", "2026-10-20"]);
+  await t.callTool("skylight_update_event", { eventId: "900", title: "x" });
+  q = t.calls.filter((c) => c.method === "GET" && c.url.pathname === EVENTS).at(-1)!.url.searchParams;
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], [addDays("2026-10-13", -365), addDays("2026-10-13", 365)]);
+  await t.close();
+  const ny = await connectTestClient([FRAMES, { method: "GET", path: EVENTS, json: { data: [] } }], { now });
+  await ny.callTool("skylight_list_events");
+  assert.equal(ny.calls.at(-1)!.url.searchParams.get("date_min"), "2026-10-12");
+  await ny.close();
+});
+
+test("create event refuses a bare time inside the spring-forward gap, with no request", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: [ev("1", "x")] } }]);
+  const r = await t.callTool("skylight_create_event", { title: "x", profileIds: ["12"], startsAt: "2026-03-08T02:30" });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /startsAt: 02:30 does not exist on that date in America\/New_York \(clocks skip forward\); pick another time/);
+  assert.equal(writes(t).length, 0);
   await t.close();
 });

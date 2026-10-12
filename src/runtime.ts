@@ -11,18 +11,20 @@ export interface Runtime {
   client: SkylightClient;
   frames: FrameResolver;
   fetch: typeof globalThis.fetch;
+  /** The clock; tools take "today" from this in the configured zone. Injectable for tests. */
+  now: () => Date;
 }
 
 export function assertMacOS(platform: string = process.platform): void {
   if (platform !== "darwin") throw new Error("skylight-mcp v1 supports macOS only (needs the Keychain).");
 }
 
-export function createRuntime(opts: { env?: NodeJS.ProcessEnv; fetch?: typeof globalThis.fetch; runner?: KeychainRunner; sleep?: Sleep } = {}): Runtime {
+export function createRuntime(opts: { env?: NodeJS.ProcessEnv; fetch?: typeof globalThis.fetch; runner?: KeychainRunner; sleep?: Sleep; now?: () => Date } = {}): Runtime {
   const config = loadConfig(opts.env ?? process.env);
   const fetch = opts.fetch ?? globalThis.fetch;
   const store = createCredentialStore({ dir: config.credentialsDir, apiBaseUrl: config.apiBaseUrl, runner: opts.runner ?? createKeychainRunner() });
   const tokens = createTokenProvider({ store, fetch, apiBaseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs });
   const client = createClient({ fetch, config, tokens, ...(opts.sleep ? { sleep: opts.sleep } : {}) });
   const frames = createFrameResolver({ client, configuredFrameId: config.frameId });
-  return { config, store, tokens, client, frames, fetch };
+  return { config, store, tokens, client, frames, fetch, now: opts.now ?? (() => new Date()) };
 }

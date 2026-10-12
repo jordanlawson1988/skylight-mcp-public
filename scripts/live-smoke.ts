@@ -6,7 +6,7 @@ import { listProfiles } from "../src/tools/profiles.js";
 import { mapChore, mapChores, mapProfile, mapProfiles, mapRewardPoints, mapRewards } from "../src/skylight/types.js";
 import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput } from "../src/skylight/chore-payload.js";
 import { buildProfileCreateBody, buildProfileUpdateBody } from "../src/skylight/profile-payload.js";
-import { localDateString } from "../src/skylight/ids.js";
+import { addDays, todayIn } from "../src/skylight/time.js";
 import { CHORE_STATUS, ROUTINE_SLOTS } from "../src/skylight/vocab.js";
 import { deletePathId, planCompletion } from "../src/tools/chores.js";
 import { phase2Smoke } from "./live-smoke-phase2.js";
@@ -18,7 +18,7 @@ async function main() {
   console.log("frame", frameId);
   const profiles = await listProfiles(rt);
   console.log("profiles", profiles.map((p) => `${p.name}:${p.id}`).join(", "));
-  const today = localDateString();
+  const today = todayIn(rt.config.timezone, rt.now());
   const chores = mapChores(await rt.client.request({ method: "GET", path: `/api/frames/${frameId}/chores`, query: { after: today, before: today, include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" } }));
   console.log("chores today", chores.length);
   const rawPoints = await rt.client.request<unknown>({ method: "GET", path: `/api/frames/${frameId}/reward_points` });
@@ -45,10 +45,6 @@ async function main() {
 }
 
 const PREFIX = "[skylight-mcp smoke]";
-
-function addDays(date: string, n: number): string {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-}
 
 async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today: string): Promise<void> {
   const base = `/api/frames/${frameId}/chores`;

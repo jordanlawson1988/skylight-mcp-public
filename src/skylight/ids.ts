@@ -50,16 +50,6 @@ export function parseEventId(value: unknown, field: string): EventRef {
   return { masterId: m[1]!, occurrence };
 }
 
-export function localDateString(d: Date = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/** Calendar-day arithmetic on a YYYY-MM-DD string (UTC math, so DST never shifts the result). */
-export function addDays(date: string, days: number): string {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
-}
-
 export function assertDate(value: string, field: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new ValidationError(field, "must be YYYY-MM-DD");
   const d = new Date(`${value}T00:00:00Z`);

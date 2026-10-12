@@ -6,11 +6,11 @@ import { createFakeKeychain } from "./fake-keychain.js";
 import { createMockFetch, type MockRoute, type RecordedCall } from "./mock-fetch.js";
 import { makeTmpDir } from "./tmp-dir.js";
 
-export async function connectTestClient(routes: MockRoute[], opts: { loggedIn?: boolean; env?: NodeJS.ProcessEnv; sleep?: (ms: number) => Promise<void> } = {}) {
+export async function connectTestClient(routes: MockRoute[], opts: { loggedIn?: boolean; env?: NodeJS.ProcessEnv; sleep?: (ms: number) => Promise<void>; now?: () => Date } = {}) {
   const { dir, cleanup } = await makeTmpDir();
   const { runner } = createFakeKeychain();
   const { fetch, calls } = createMockFetch(routes);
-  const runtime: Runtime = createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir, ...(opts.env ?? {}) }, fetch, runner, sleep: opts.sleep ?? (async () => {}) });
+  const runtime: Runtime = createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir, ...(opts.env ?? {}) }, fetch, runner, sleep: opts.sleep ?? (async () => {}), ...(opts.now ? { now: opts.now } : {}) });
   if (opts.loggedIn !== false) {
     await runtime.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: Date.now() + 3_600_000 });
   }

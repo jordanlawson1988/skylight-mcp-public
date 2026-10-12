@@ -1,13 +1,12 @@
 // Phase 2 live write checks: rewards, routine reordering, lists and calendar events. Called from live-smoke.ts when SKYLIGHT_LIVE_WRITE=1.
 // Everything runs through the real MCP tools (in-memory client) where that is the behavior under test, and through raw requests for read-backs.
 // Every created object carries the PREFIX; cleanup happens in `finally`, followed by leftover checks for rewards, lists and events.
-import { toOffsetDateTime } from "../src/skylight/time.js";
+import { addDays, toOffsetDateTime } from "../src/skylight/time.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { createServer } from "../src/server.js";
 import { buildChoreCreateBody } from "../src/skylight/chore-payload.js";
-import { addDays } from "../src/skylight/ids.js";
 import { buildProfileCreateBody, buildProfileUpdateBody } from "../src/skylight/profile-payload.js";
 import { mapChores, mapProfile, mapRewardPoints, mapRewards } from "../src/skylight/types.js";
 import { OWN_EVENT_SOURCE } from "../src/skylight/vocab.js";

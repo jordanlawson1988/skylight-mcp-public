@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatHuman, formatOffsetDateTime, offsetMinutesAt, toOffsetDateTime } from "../../src/skylight/time.js";
+import { addDays, formatHuman, formatOffsetDateTime, offsetMinutesAt, parseInstant, todayIn, toOffsetDateTime } from "../../src/skylight/time.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 const NY = "America/New_York";
@@ -62,4 +62,69 @@ test("toOffsetDateTime rejects other shapes and impossible values with the field
   for (const bad of ["", "nope", "2026-10-12", "2026-10-12 18:30", "2026-02-30T10:00", "2026-10-12T24:00", "2026-10-12T10:60", "2026-10-12T10:00:60", "2026-10-12T10:00+25:00", "2026-10-12T10:00+04:60", "2026-10-12T10:00.5.5", "6:30 PM"]) {
     assert.throws(() => toOffsetDateTime(bad, NY, "startsAt"), (e: unknown) => e instanceof ValidationError && e.field === "startsAt" && e.message.includes("read as America/New_York time, or add an explicit offset"), bad);
   }
+});
+
+test("todayIn gives the calendar date in the zone, not in UTC or the process zone", () => {
+  const instant = new Date("2026-10-12T23:30:00Z");
+  assert.equal(todayIn("UTC", instant), "2026-10-12");
+  assert.equal(todayIn(NY, instant), "2026-10-12");
+  assert.equal(todayIn("Pacific/Auckland", instant), "2026-10-13");
+  assert.equal(todayIn("Pacific/Honolulu", new Date("2026-10-12T05:00:00Z")), "2026-10-11");
+  assert.equal(todayIn(NY, new Date("2026-01-01T04:59:00Z")), "2025-12-31");
+  assert.equal(todayIn(NY, new Date("2026-01-01T05:00:00Z")), "2026-01-01");
+});
+
+test("addDays does calendar arithmetic on YYYY-MM-DD across month, year and DST boundaries", () => {
+  assert.equal(addDays("2026-10-12", 7), "2026-10-19");
+  assert.equal(addDays("2026-01-31", 1), "2026-02-01");
+  assert.equal(addDays("2026-12-31", 1), "2027-01-01");
+  assert.equal(addDays("2026-03-01", -1), "2026-02-28");
+  assert.equal(addDays("2026-03-07", 2), "2026-03-09");
+  assert.equal(addDays("2026-11-01", -365), "2025-11-01");
+});
+
+test("parseInstant reads a datetime with no zone suffix as UTC and leaves suffixed values alone", () => {
+  assert.equal(parseInstant("2026-10-12T18:30:00"), Date.parse("2026-10-12T18:30:00Z"));
+  assert.equal(parseInstant("2026-10-12T18:30"), Date.parse("2026-10-12T18:30:00Z"));
+  assert.equal(parseInstant("2026-10-12T18:30:00-04:00"), Date.parse("2026-10-12T22:30:00Z"));
+  assert.equal(parseInstant("2026-10-12T18:30:00.000Z"), Date.parse("2026-10-12T18:30:00Z"));
+  assert.equal(parseInstant("2026-10-12"), Date.parse("2026-10-12T00:00:00Z"));
+  assert.ok(Number.isNaN(parseInstant("nope")));
+});
+
+test("formatting never depends on the process time zone", () => {
+  const was = process.env.TZ;
+  const render = () => [formatOffsetDateTime("2026-10-12T22:30:00", NY), formatHuman("2026-10-12T22:30:00", NY), formatOffsetDateTime("2026-10-12T22:30:00Z", NY), todayIn(NY, new Date("2026-10-12T23:30:00Z"))];
+  try {
+    process.env.TZ = "UTC";
+    const utc = render();
+    process.env.TZ = "Asia/Tokyo";
+    const tokyo = render();
+    assert.deepEqual(tokyo, utc);
+    assert.deepEqual(utc, ["2026-10-12T18:30:00-04:00", "Mon Oct 12, 6:30 PM EDT", "2026-10-12T18:30:00-04:00", "2026-10-12"]);
+  } finally {
+    if (was === undefined) delete process.env.TZ; else process.env.TZ = was;
+  }
+});
+
+test("toOffsetDateTime refuses a time that does not exist because clocks skip forward", () => {
+  assert.throws(() => toOffsetDateTime("2026-03-08T02:30", NY, "startsAt"), (e: unknown) =>
+    e instanceof ValidationError && e.field === "startsAt" && e.message === "startsAt: 02:30 does not exist on that date in America/New_York (clocks skip forward); pick another time");
+  assert.throws(() => toOffsetDateTime("2026-03-08T02:00:00", NY, "f"), /does not exist/);
+  assert.throws(() => toOffsetDateTime("2026-03-29T02:30", "Europe/Berlin", "f"), /02:30 does not exist on that date in Europe\/Berlin/);
+  // the edges around the gap exist
+  assert.equal(toOffsetDateTime("2026-03-08T01:59", NY, "f"), "2026-03-08T01:59:00-05:00");
+  assert.equal(toOffsetDateTime("2026-03-08T03:00", NY, "f"), "2026-03-08T03:00:00-04:00");
+  assert.equal(toOffsetDateTime("2026-03-29T01:59", "Europe/Berlin", "f"), "2026-03-29T01:59:00+01:00");
+  assert.equal(toOffsetDateTime("2026-03-29T03:00", "Europe/Berlin", "f"), "2026-03-29T03:00:00+02:00");
+  // an explicit offset is never checked against the zone
+  assert.equal(toOffsetDateTime("2026-03-08T02:30-05:00", NY, "f"), "2026-03-08T02:30:00-05:00");
+});
+
+test("an ambiguous fall-back hour resolves to the first (daylight) occurrence, in zones west and east of UTC", () => {
+  assert.equal(toOffsetDateTime("2026-11-01T01:30", NY, "f"), "2026-11-01T01:30:00-04:00");
+  assert.equal(toOffsetDateTime("2026-10-25T02:30", "Europe/Berlin", "f"), "2026-10-25T02:30:00+02:00");
+  assert.equal(toOffsetDateTime("2026-10-25T02:59", "Europe/Berlin", "f"), "2026-10-25T02:59:00+02:00");
+  assert.equal(toOffsetDateTime("2026-10-25T03:00", "Europe/Berlin", "f"), "2026-10-25T03:00:00+01:00");
+  assert.equal(toOffsetDateTime("2026-04-05T02:30", "Australia/Sydney", "f"), "2026-04-05T02:30:00+11:00");
 });

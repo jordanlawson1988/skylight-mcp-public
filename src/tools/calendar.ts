@@ -2,9 +2,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildEventCreateBody, buildEventUpdateBody, MAX_EVENT_TITLE_LENGTH, MAX_LOCATION_LENGTH, type EventFields } from "../skylight/event-payload.js";
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
-import { addDays, assertDate, assertId, localDateString, parseEventId, type EventRef } from "../skylight/ids.js";
+import { assertDate, assertId, parseEventId, type EventRef } from "../skylight/ids.js";
 import { mapEvent, mapEvents, type CalendarEvent } from "../skylight/types.js";
-import { formatHuman, formatHumanTime, formatOffsetDateTime, zoneLabel } from "../skylight/time.js";
+import { addDays, formatHuman, formatHumanTime, formatOffsetDateTime, parseInstant, todayIn, zoneLabel } from "../skylight/time.js";
 import { EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, OWN_EVENT_SOURCE } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { recurrenceShape } from "./chores.js";
@@ -38,7 +38,7 @@ async function lookupEvent(ctx: ToolContext, frameId: string, ref: EventRef, id:
     const day = new Date(ref.occurrence * 1000).toISOString().slice(0, 10);
     after = addDays(day, -1); before = addDays(day, 1);
   } else {
-    const today = localDateString();
+    const today = todayIn(ctx.config.timezone, ctx.now());
     after = addDays(today, -LOOKUP_DAYS); before = addDays(today, LOOKUP_DAYS);
   }
   try {
@@ -81,8 +81,8 @@ export function presentEvent(e: CalendarEvent, tz: string): PresentedEvent {
 }
 
 function byStart(a: CalendarEvent, b: CalendarEvent): number {
-  const ta = a.startsAt === null ? Infinity : Date.parse(a.startsAt);
-  const tb = b.startsAt === null ? Infinity : Date.parse(b.startsAt);
+  const ta = a.startsAt === null ? Infinity : parseInstant(a.startsAt);
+  const tb = b.startsAt === null ? Infinity : parseInstant(b.startsAt);
   if (ta !== tb) return ta < tb ? -1 : 1;
   return a.title < b.title ? -1 : a.title > b.title ? 1 : 0;
 }
@@ -123,7 +123,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       annotations: ANNOTATIONS.read,
     },
     (args) => run(async () => {
-      const after = assertDate(args.after ?? localDateString(), "after");
+      const after = assertDate(args.after ?? todayIn(tz, ctx.now()), "after");
       const before = assertDate(args.before ?? addDays(after, 7), "before");
       if (after > before) throw new ValidationError("after", "must not be later than before");
       if (Date.parse(`${before}T00:00:00Z`) - Date.parse(`${after}T00:00:00Z`) > MAX_EVENT_SPAN_DAYS * 86_400_000) throw new ValidationError("before", `must be within ${MAX_EVENT_SPAN_DAYS} days of after`);

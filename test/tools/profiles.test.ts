@@ -254,3 +254,13 @@ test("preview with reassign sends no DELETE", async () => {
   assert.equal(t.calls.filter((c) => c.method === "DELETE").length, 0);
   await t.close();
 });
+
+test("delete profile preview counts upcoming chores from the configured zone's today", async () => {
+  const t = await connectTestClient([FRAMES,
+    { method: "GET", path: "/api/frames/77/categories", json: { data: [{ id: "12", attributes: { label: "Ellie", linked_to_profile: true } }] } },
+    { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }], { env: { SKYLIGHT_TIMEZONE: "Pacific/Auckland" }, now: () => new Date("2026-10-12T23:30:00Z") });
+  await t.callTool("skylight_delete_profile", { profileId: "12" });
+  const q = t.calls.find((c) => c.url.pathname === "/api/frames/77/chores")!.url.searchParams;
+  assert.deepEqual([q.get("after"), q.get("before")], ["2026-10-13", "2027-01-11"]);
+  await t.close();
+});

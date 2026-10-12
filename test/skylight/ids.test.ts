@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, assertEmoji, assertPoints, localDateString } from "../../src/skylight/ids.js";
+import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, assertEmoji, assertPoints } from "../../src/skylight/ids.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 test("assertId accepts simple ids and numbers", () => {
@@ -46,11 +46,6 @@ test("assertPoints bounds integers", () => {
   assert.equal(assertPoints(-5, "p"), -5);
   assert.throws(() => assertPoints(1.5, "p"), ValidationError);
   assert.throws(() => assertPoints(10001, "p"), ValidationError);
-});
-
-test("localDateString uses local calendar fields, zero-padded", () => {
-  assert.equal(localDateString(new Date(2026, 0, 31, 23, 30)), "2026-01-31");
-  assert.equal(localDateString(new Date(2026, 11, 1, 0, 5)), "2026-12-01");
 });
 
 test("parseChoreId splits composite ids and passes plain ids through", () => {

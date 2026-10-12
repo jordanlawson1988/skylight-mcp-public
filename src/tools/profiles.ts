@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
-import { assertId, localDateString } from "../skylight/ids.js";
+import { assertId } from "../skylight/ids.js";
+import { addDays, todayIn } from "../skylight/time.js";
 import { buildProfileCreateBody, buildProfileUpdateBody, type ProfileInput } from "../skylight/profile-payload.js";
 import { mapChores, mapProfile, mapProfiles, type Profile } from "../skylight/types.js";
 import { DEFAULT_PROFILE_KIND, PROFILE_KINDS, isLabelKind, isPersonKind } from "../skylight/vocab.js";
@@ -24,8 +25,8 @@ const kindSchema = z.enum(PROFILE_KINDS);
 
 async function countUpcomingChores(ctx: ToolContext, frameId: string, profileId: string): Promise<number | null> {
   try {
-    const after = localDateString();
-    const before = new Date(Date.parse(`${after}T00:00:00Z`) + UPCOMING_DAYS * 86_400_000).toISOString().slice(0, 10);
+    const after = todayIn(ctx.config.timezone, ctx.now());
+    const before = addDays(after, UPCOMING_DAYS);
     const chores = mapChores(await ctx.client.request({
       method: "GET", path: `/api/frames/${frameId}/chores`,
       query: { after, before, include_late: true, include_up_for_grabs: false, filter: "linked_to_profile" },

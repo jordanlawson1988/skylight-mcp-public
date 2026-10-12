@@ -928,3 +928,15 @@ test("complete chore shows the returned completedAt in Eastern time", async () =
   assert.equal(d.chore.completedAt, "2026-01-27T11:00:00-05:00");
   await t.close();
 });
+
+test("list chores and the delete preview default to the configured zone's today", async () => {
+  const now = () => new Date("2026-10-12T23:30:00Z"); // Oct 13 in Auckland, Oct 12 in UTC and New York
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }], { env: { SKYLIGHT_TIMEZONE: "Pacific/Auckland" }, now });
+  await t.callTool("skylight_list_chores");
+  let q = t.calls.at(-1)!.url.searchParams;
+  assert.deepEqual([q.get("after"), q.get("before")], ["2026-10-13", "2026-10-27"]);
+  await t.callTool("skylight_delete_chore", { choreId: "123" });
+  q = t.calls.at(-1)!.url.searchParams;
+  assert.deepEqual([q.get("after"), q.get("before")], ["2026-09-13", "2026-12-12"]);
+  await t.close();
+});
