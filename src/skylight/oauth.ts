@@ -82,7 +82,10 @@ export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now
   } catch {
     throw new AuthError("Paste the complete https://ourskylight.com/welcome?code=... address.");
   }
-  if (url.protocol !== "https:" || url.hostname !== "ourskylight.com" || url.pathname !== "/welcome") {
+  if (
+    url.protocol !== "https:" || url.hostname !== "ourskylight.com" || url.pathname !== "/welcome" ||
+    url.username !== "" || url.password !== "" || url.port !== ""
+  ) {
     throw new AuthError("Callback URL must begin with https://ourskylight.com/welcome.");
   }
   const code = url.searchParams.get("code");
@@ -95,20 +98,32 @@ export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now
   return { code };
 }
 
-function excerpt(text: string): string {
-  const clean = text.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").trim();
-  return clean.length > MAX_EXCERPT ? `${clean.slice(0, MAX_EXCERPT)}…` : clean;
+const TOKEN_VALUE = /("(?:access_token|refresh_token)"\s*:\s*)"(?:[^"\\]|\\.)*"/g;
+
+function excerpt(text: string, secrets: readonly string[] = []): string {
+  let out = text.replace(TOKEN_VALUE, '$1"[redacted]"');
+  for (const secret of secrets) {
+    if (!secret) continue;
+    for (const variant of new Set([secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)])) {
+      out = out.split(variant).join("[redacted]");
+    }
+  }
+  const clean = out.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").trim();
+  return clean.length > MAX_EXCERPT ? `${clean.slice(0, MAX_EXCERPT - 1)}…` : clean;
 }
 
-function toCredential(json: unknown, fingerprint: string): OAuthCredential {
+function toCredential(json: unknown, fingerprint: string, fallbackRefreshToken?: string): OAuthCredential {
   const r = (json ?? {}) as Record<string, unknown>;
   if (typeof r.access_token !== "string" || r.access_token.length === 0) throw new AuthError("Skylight token response had no access token.");
-  if (typeof r.refresh_token !== "string" || r.refresh_token.length === 0) throw new AuthError("Skylight token response had no refresh token.");
-  if (typeof r.expires_in !== "number" || !(r.expires_in > 0)) throw new AuthError("Skylight token response had no valid expiry.");
+  let refreshToken: string;
+  if (typeof r.refresh_token === "string" && r.refresh_token.length > 0) refreshToken = r.refresh_token;
+  else if (r.refresh_token === undefined && fallbackRefreshToken) refreshToken = fallbackRefreshToken;
+  else throw new AuthError("Skylight token response had no refresh token.");
+  if (typeof r.expires_in !== "number" || !Number.isFinite(r.expires_in) || !(r.expires_in > 0)) throw new AuthError("Skylight token response had no valid expiry.");
   return {
     version: 1,
     accessToken: r.access_token,
-    refreshToken: r.refresh_token,
+    refreshToken,
     fingerprint,
     expiresAt: Date.now() + Math.floor(r.expires_in * 1000),
   };
@@ -116,6 +131,7 @@ function toCredential(json: unknown, fingerprint: string): OAuthCredential {
 
 async function tokenRequest(opts: {
   fetch: typeof globalThis.fetch; apiBaseUrl: string; form: URLSearchParams; fingerprint: string; timeoutMs: number; what: string;
+  secrets: readonly string[]; fallbackRefreshToken?: string;
 }): Promise<OAuthCredential> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
@@ -124,17 +140,18 @@ async function tokenRequest(opts: {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
       body: opts.form,
+      redirect: "error",
       signal: controller.signal,
     });
     const text = await res.text();
-    if (!res.ok) throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text)}`);
+    if (!res.ok) throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text, opts.secrets)}`);
     let json: unknown;
     try { json = JSON.parse(text); } catch { throw new AuthError(`Skylight ${opts.what} returned invalid JSON.`); }
-    return toCredential(json, opts.fingerprint);
+    return toCredential(json, opts.fingerprint, opts.fallbackRefreshToken);
   } catch (e) {
     if (e instanceof AuthError) throw e;
     if (controller.signal.aborted) throw new AuthError(`Skylight ${opts.what} timed out.`);
-    throw new AuthError(`Skylight ${opts.what} failed: ${excerpt(e instanceof Error ? e.message : String(e))}`);
+    throw new AuthError(`Skylight ${opts.what} failed: ${excerpt(e instanceof Error ? e.message : String(e), opts.secrets)}`);
   } finally {
     clearTimeout(timer);
   }
@@ -145,6 +162,7 @@ export function exchangeCode(opts: {
 }): Promise<OAuthCredential> {
   return tokenRequest({
     fetch: opts.fetch, apiBaseUrl: opts.apiBaseUrl, timeoutMs: opts.timeoutMs, fingerprint: opts.pending.fingerprint, what: "login",
+    secrets: [opts.code, opts.pending.verifier, opts.pending.state],
     form: new URLSearchParams({
       grant_type: "authorization_code",
       code: opts.code,
@@ -162,6 +180,8 @@ export function refreshCredential(opts: {
 }): Promise<OAuthCredential> {
   return tokenRequest({
     fetch: opts.fetch, apiBaseUrl: opts.apiBaseUrl, timeoutMs: opts.timeoutMs, fingerprint: opts.credential.fingerprint, what: "token refresh",
+    secrets: [opts.credential.refreshToken, opts.credential.accessToken],
+    fallbackRefreshToken: opts.credential.refreshToken,
     form: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: opts.credential.refreshToken,

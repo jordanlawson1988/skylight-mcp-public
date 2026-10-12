@@ -64,6 +64,15 @@ test("parseCallbackUrl rejects wrong host, path, scheme, missing code and stale 
   assert.throws(() => parseCallbackUrl("not a url", p, 2000), AuthError);
 });
 
+test("parseCallbackUrl rejects userinfo, explicit port and trailing-dot host", () => {
+  const p = createPendingLogin(1000);
+  const s = p.state;
+  assert.throws(() => parseCallbackUrl(`https://evil@ourskylight.com/welcome?code=a&state=${s}`, p, 2000), AuthError);
+  assert.throws(() => parseCallbackUrl(`https://user:pw@ourskylight.com/welcome?code=a&state=${s}`, p, 2000), AuthError);
+  assert.throws(() => parseCallbackUrl(`https://ourskylight.com:8443/welcome?code=a&state=${s}`, p, 2000), AuthError);
+  assert.throws(() => parseCallbackUrl(`https://ourskylight.com./welcome?code=a&state=${s}`, p, 2000), AuthError);
+});
+
 test("exchangeCode posts form with verifier and returns credential", async () => {
   const p = createPendingLogin(1000);
   const { fetch, calls } = createMockFetch([
@@ -88,13 +97,51 @@ test("exchangeCode posts form with verifier and returns credential", async () =>
 
 test("exchangeCode surfaces server rejection without echoing tokens", async () => {
   const p = createPendingLogin();
+  const code = "SECRETCODE12345";
+  const rt = "FAKE-REFRESH-TOKEN-abcdef";
   const { fetch } = createMockFetch([
-    { method: "POST", path: "/oauth/token", status: 400, json: { error: "invalid_grant", error_description: "Code challenge is required." } },
+    {
+      method: "POST", path: "/oauth/token", status: 400,
+      json: {
+        error: "invalid_grant", error_description: "Code challenge is required.",
+        echoed: { code, code_verifier: p.verifier }, access_token: "FAKE-ACCESS-TOKEN-xyz", refresh_token: rt,
+      },
+    },
   ]);
   await assert.rejects(
-    exchangeCode({ fetch, apiBaseUrl: BASE, code: "C", pending: p, timeoutMs: 1000 }),
-    (e: unknown) => e instanceof AuthError && /400/.test(e.message) && /Code challenge/.test(e.message)
+    exchangeCode({ fetch, apiBaseUrl: BASE, code, pending: p, timeoutMs: 1000 }),
+    (e: unknown) => {
+      if (!(e instanceof AuthError)) return false;
+      assert.match(e.message, /400/);
+      assert.match(e.message, /Code challenge/);
+      for (const secret of [code, p.verifier, rt, "FAKE-ACCESS-TOKEN-xyz"]) assert.ok(!e.message.includes(secret), `leaked ${secret}`);
+      return true;
+    }
   );
+});
+
+test("error excerpt is at most 500 characters", async () => {
+  const p = createPendingLogin();
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status: 500, text: "x".repeat(2000) }]);
+  await assert.rejects(
+    exchangeCode({ fetch, apiBaseUrl: BASE, code: "CODE1234", pending: p, timeoutMs: 1000 }),
+    (e: unknown) => {
+      if (!(e instanceof AuthError)) return false;
+      const excerptPart = e.message.slice(e.message.indexOf("): ") + 3);
+      assert.equal(excerptPart.length, 500);
+      return true;
+    }
+  );
+});
+
+test("token request is sent with redirect: error", async () => {
+  const p = createPendingLogin();
+  let redirect: RequestRedirect | undefined;
+  const { fetch } = createMockFetch([
+    { method: "POST", path: "/oauth/token", handler: ({ init }) => { redirect = init.redirect; return { json: { access_token: "A", refresh_token: "R", expires_in: 10 } }; } },
+  ]);
+  await exchangeCode({ fetch, apiBaseUrl: BASE, code: "CODE1234", pending: p, timeoutMs: 1000 });
+  assert.equal(redirect, "error");
 });
 
 test("refreshCredential posts refresh grant and keeps fingerprint", async () => {
@@ -115,6 +162,30 @@ test("refreshCredential posts refresh grant and keeps fingerprint", async () => 
 
 test("token response missing fields is an AuthError", async () => {
   const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", json: { access_token: "x" } }]);
+  await assert.rejects(
+    refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: { version: 1, accessToken: "a", refreshToken: "r", fingerprint: "f", expiresAt: 0 } }),
+    AuthError
+  );
+});
+
+test("refresh without refresh_token keeps the previous one", async () => {
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", json: { access_token: "AT3", expires_in: 50 } }]);
+  const cred = await refreshCredential({
+    fetch, apiBaseUrl: BASE, timeoutMs: 1000,
+    credential: { version: 1, accessToken: "AT", refreshToken: "OLD-RT", fingerprint: "fp", expiresAt: 0 },
+  });
+  assert.equal(cred.accessToken, "AT3");
+  assert.equal(cred.refreshToken, "OLD-RT");
+});
+
+test("code exchange still requires a refresh_token", async () => {
+  const p = createPendingLogin();
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", json: { access_token: "AT", expires_in: 50 } }]);
+  await assert.rejects(exchangeCode({ fetch, apiBaseUrl: BASE, code: "CODE1234", pending: p, timeoutMs: 1000 }), AuthError);
+});
+
+test("non-finite expires_in is rejected", async () => {
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", text: '{"access_token":"a","refresh_token":"r","expires_in":1e999}' }]);
   await assert.rejects(
     refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: { version: 1, accessToken: "a", refreshToken: "r", fingerprint: "f", expiresAt: 0 } }),
     AuthError
