@@ -152,6 +152,13 @@ function mapUpdateError(e: unknown): unknown {
   return e;
 }
 
+/** Series id of any chore id form; the move endpoint only takes numeric ids. */
+function numericSeriesId(value: string, field: string): string {
+  const { seriesId } = parseChoreId(value, field);
+  if (!/^\d+$/.test(seriesId)) throw new ValidationError(field, "must be a numeric chore id as returned by skylight_list_chores");
+  return seriesId;
+}
+
 const DELETE_SCOPE_TEXT = {
   all: "every occurrence of this recurring chore",
   future: "this occurrence and all later ones",
@@ -366,6 +373,30 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         throw mapCompletionError(e);
       }
       return { seriesId, instanceDate, status, chore: mapChore((json as { data?: unknown })?.data) };
+    })
+  );
+
+  server.registerTool(
+    "skylight_move_routine_step",
+    {
+      title: "Reorder a routine step",
+      description: "Move a routine step before or after another step, which changes the `position` that skylight_list_chores reports and the order the steps show in the routine. Pass exactly one of beforeChoreId or afterChoreId. Ids may be passed exactly as returned by skylight_list_chores (the series id is used). Moving is idempotent: repeating it leaves the same order.",
+      inputSchema: {
+        choreId: z.string().describe("The step to move: chore id as returned by skylight_list_chores."),
+        beforeChoreId: z.string().optional().describe("Place the step immediately before this step."),
+        afterChoreId: z.string().optional().describe("Place the step immediately after this step."),
+      },
+      annotations: ANNOTATIONS.update,
+    },
+    (args) => run(async () => {
+      if ((args.beforeChoreId === undefined) === (args.afterChoreId === undefined)) throw new ValidationError("beforeChoreId", "pass exactly one of beforeChoreId or afterChoreId");
+      const position = args.beforeChoreId !== undefined ? "before" : "after";
+      const seriesId = numericSeriesId(args.choreId, "choreId");
+      const relativeTo = numericSeriesId((args.beforeChoreId ?? args.afterChoreId)!, position === "before" ? "beforeChoreId" : "afterChoreId");
+      if (relativeTo === seriesId) throw new ValidationError(position === "before" ? "beforeChoreId" : "afterChoreId", "must be a different step than choreId");
+      const frameId = await ctx.frames.resolve();
+      await ctx.client.request({ method: "POST", path: `${choresPath(frameId)}/${seriesId}/move`, body: { position: { [position]: Number(relativeTo) } } });
+      return { moved: true, seriesId, position, relativeTo };
     })
   );
 }

@@ -865,3 +865,49 @@ test("planCompletion sends an explicit instanceTime with a plain id", async () =
   assert.deepEqual(planCompletion({ choreId: "60913118", instanceDate: "2026-10-12", instanceTime: "06:00" }), { seriesId: "60913118", instanceDate: "2026-10-12", status: "complete", body: { status: "complete", instance_date: "2026-10-12", instance_time: "06:00" } });
   assert.throws(() => planCompletion({ choreId: "60913118-2026-10-12-0600", instanceTime: "14:00" }), /does not match the time/);
 });
+
+test("move routine step before another sends position.before with numeric series ids", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/60913118/move", json: {} }]);
+  const r = await t.callTool("skylight_move_routine_step", { choreId: "60913118-2026-10-12-0600", beforeChoreId: "60913117-2026-10-12-0600" });
+  assert.equal(r.isError, false);
+  const post = t.calls.filter((c) => c.method === "POST");
+  assert.equal(post.length, 1);
+  assert.equal(post[0]!.url.pathname, "/api/frames/77/chores/60913118/move");
+  assert.deepEqual(post[0]!.body, { position: { before: 60913117 } });
+  assert.deepEqual(r.data, { moved: true, seriesId: "60913118", position: "before", relativeTo: "60913117" });
+  await t.close();
+});
+
+test("move routine step after another sends position.after", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/5/move", json: null }]);
+  const r = await t.callTool("skylight_move_routine_step", { choreId: "5", afterChoreId: "6" });
+  assert.equal(r.isError, false);
+  assert.deepEqual(t.calls.at(-1)!.body, { position: { after: 6 } });
+  assert.deepEqual(r.data, { moved: true, seriesId: "5", position: "after", relativeTo: "6" });
+  await t.close();
+});
+
+test("move routine step needs exactly one anchor, two different steps and valid ids, before any request", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: /\/move$/, json: {} }]);
+  for (const args of [
+    { choreId: "5" },
+    { choreId: "5", beforeChoreId: "6", afterChoreId: "7" },
+    { choreId: "5", beforeChoreId: "5" },
+    { choreId: "5-2026-10-12-0600", afterChoreId: "5-2026-10-13-0600" },
+    { choreId: "../5", beforeChoreId: "6" },
+    { choreId: "5", beforeChoreId: "a/b" },
+    { choreId: "abc", beforeChoreId: "6" },
+  ]) {
+    assert.equal((await t.callTool("skylight_move_routine_step", args)).isError, true, JSON.stringify(args));
+  }
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 0);
+  await t.close();
+});
+
+test("move routine step is annotated idempotent update", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const tool = (await t.client.listTools()).tools.find((x) => x.name === "skylight_move_routine_step")!;
+  assert.equal(tool.annotations?.idempotentHint, true);
+  assert.match(tool.description ?? "", /position/);
+  await t.close();
+});
