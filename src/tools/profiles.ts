@@ -4,7 +4,7 @@ import { ValidationError } from "../skylight/errors.js";
 import { assertId, localDateString } from "../skylight/ids.js";
 import { buildProfileCreateBody, buildProfileUpdateBody, type ProfileInput } from "../skylight/profile-payload.js";
 import { mapChores, mapProfile, mapProfiles, type Profile } from "../skylight/types.js";
-import { PROFILE_KINDS } from "../skylight/vocab.js";
+import { DEFAULT_PROFILE_KIND, PROFILE_KINDS, isPersonKind } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { ANNOTATIONS, run } from "./result.js";
 
@@ -30,7 +30,8 @@ async function countUpcomingChores(ctx: ToolContext, frameId: string, profileId:
       method: "GET", path: `/api/frames/${frameId}/chores`,
       query: { after, before, include_late: true, include_up_for_grabs: false, filter: "linked_to_profile" },
     }));
-    return chores.filter((c) => c.profileIds.includes(profileId)).length;
+    // Distinct chores, not occurrences: a recurring chore listed on many days counts once.
+    return new Set(chores.filter((c) => c.profileIds.includes(profileId)).map((c) => c.seriesId)).size;
   } catch {
     return null;
   }
@@ -67,7 +68,7 @@ export function registerProfileTools(server: McpServer, ctx: ToolContext): void 
       annotations: ANNOTATIONS.create,
     },
     (args) => run(async () => {
-      const body = buildProfileCreateBody({ name: args.name, color: args.color, kind: args.kind ?? "profile" });
+      const body = buildProfileCreateBody({ name: args.name, color: args.color, kind: args.kind ?? DEFAULT_PROFILE_KIND });
       const frameId = await ctx.frames.resolve();
       const json = await ctx.client.request<unknown>({ method: "POST", path: categoriesPath(frameId), body });
       return mapProfile((json as { data?: unknown } | null)?.data) ?? { created: true, warning: "Skylight returned no profile id; list profiles to confirm." };
@@ -120,7 +121,7 @@ export function registerProfileTools(server: McpServer, ctx: ToolContext): void 
       if (args.confirm !== true) {
         const upcomingChores = await countUpcomingChores(ctx, frameId, profileId);
         const moves = reassignTo ? `Its chores and events will move to ${reassignTo.name}.` : "Its chores and events will be deleted with it.";
-        const alternative = target.kind === "profile" ? " Alternative: skylight_update_profile with kind: \"label\" keeps the events and only removes the person." : "";
+        const alternative = isPersonKind(target.kind) ? " Alternative: skylight_update_profile with kind: \"label\" keeps the events and only removes the person." : "";
         return {
           confirmed: false,
           wouldDelete: { id: target.id, name: target.name, kind: target.kind, upcomingChores, reassignTo: reassignTo ? { id: reassignTo.id, name: reassignTo.name } : null },

@@ -12,3 +12,6 @@ export const PROFILE_KINDS = ["profile", "label"] as const;
 export type ProfileKind = (typeof PROFILE_KINDS)[number];
 export const kindFromLinked = (linked: boolean | null): ProfileKind | null => linked === null ? null : linked ? "profile" : "label";
 export const linkedFromKind = (kind: ProfileKind): boolean => kind === "profile";
+export const DEFAULT_PROFILE_KIND: ProfileKind = "profile";
+/** True for a person (profile with a chore-chart column), false for a calendar label or unknown. */
+export const isPersonKind = (kind: ProfileKind | null): boolean => kind !== null && linkedFromKind(kind);

@@ -201,3 +201,45 @@ test("profile tools have the right annotations", async () => {
   assert.match(tools.find((x) => x.name === "skylight_update_profile")!.description!, /Convert to Label/);
   await t.close();
 });
+
+test("upcomingChores counts distinct chores, not occurrences", async () => {
+  const occ = (date: string) => ({ id: `5-${date}`, type: "chore", attributes: { summary: "Dishes", start: date, series: "5", recurring: true }, relationships: { category: { data: { id: "12", type: "category" } } } });
+  const chores: MockRoute = { method: "GET", path: "/api/frames/77/chores", json: { data: [occ("2026-10-13"), occ("2026-10-14"), occ("2026-10-15"), choreFor("1", "12"), choreFor("3", "14")] } };
+  const t = await connectTestClient([FRAMES, CATS, chores]);
+  const r = await t.callTool("skylight_delete_profile", { profileId: "12" });
+  assert.equal((r.data as { wouldDelete: { upcomingChores: number } }).wouldDelete.upcomingChores, 2);
+  await t.close();
+});
+
+test("update with kind profile sends both flags true", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/categories/13", json: { data: cat("13", "Birthdays", true) } }]);
+  const r = await t.callTool("skylight_update_profile", { profileId: "13", kind: "profile" });
+  assert.equal(r.isError, false);
+  assert.deepEqual(t.calls.find((c) => c.method === "PUT")!.body, { linked_to_profile: true, selected_for_chore_chart: true });
+  await t.close();
+});
+
+test("delete with confirm: false sends no DELETE", async () => {
+  const t = await connectTestClient([FRAMES, CATS, CHORES]);
+  const r = await t.callTool("skylight_delete_profile", { profileId: "12", confirm: false });
+  assert.equal((r.data as { confirmed: boolean }).confirmed, false);
+  assert.equal(t.calls.filter((c) => c.method === "DELETE").length, 0);
+  await t.close();
+});
+
+test("confirmed delete never fetches chores", async () => {
+  const t = await connectTestClient([FRAMES, CATS, { method: "DELETE", path: "/api/frames/77/categories/12", status: 204 }]);
+  await t.callTool("skylight_delete_profile", { profileId: "12", confirm: true });
+  await t.callTool("skylight_delete_profile", { profileId: "12", reassignToProfileId: "14", confirm: true });
+  assert.ok(!t.calls.some((c) => c.method === "GET" && c.url.pathname.endsWith("/chores")));
+  assert.equal(t.calls.filter((c) => c.method === "DELETE").length, 2);
+  await t.close();
+});
+
+test("preview with reassign sends no DELETE", async () => {
+  const t = await connectTestClient([FRAMES, CATS, CHORES]);
+  const r = await t.callTool("skylight_delete_profile", { profileId: "12", reassignToProfileId: "14" });
+  assert.equal((r.data as { confirmed: boolean }).confirmed, false);
+  assert.equal(t.calls.filter((c) => c.method === "DELETE").length, 0);
+  await t.close();
+});
