@@ -11,6 +11,13 @@ export function assertId(value: string | number, field: string): string {
   return s;
 }
 
+/** A positive decimal id of at most 15 digits (list item ids), returned as a string; the API wants them as JSON numbers in bodies. */
+export function assertNumericId(value: string | number, field: string): string {
+  const s = typeof value === "number" ? String(value) : value;
+  if (typeof s !== "string" || !/^[1-9]\d{0,14}$/.test(s)) throw new ValidationError(field, "must be a numeric id as returned by the list tools");
+  return s;
+}
+
 /** `<series>-<YYYY-MM-DD>` with an optional `-HHMM` suffix (routine-step occurrences, e.g. `60913118-2026-10-12-0600`). */
 export const COMPOSITE_CHORE_ID = /^(\d+)-(\d{4}-\d{2}-\d{2})(?:-(\d{2})(\d{2}))?$/;
 

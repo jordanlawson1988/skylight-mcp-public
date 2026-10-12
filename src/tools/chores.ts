@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreCreateBody, type ChoreInput, type ChoreUpdateInput } from "../skylight/chore-payload.js";
-import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors.js";
+import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertId, assertTime, localDateString, parseChoreId } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
 import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, ROUTINE_SLOT_NAMES } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { personProfileProblems, assertPersonProfiles } from "./profiles.js";
-import { ANNOTATIONS, run } from "./result.js";
+import { ANNOTATIONS, run, stopReason } from "./result.js";
 
 export const MAX_BULK = 50;
 
@@ -53,12 +53,6 @@ async function createOne(ctx: ToolContext, frameId: string, body: ChoreCreateBod
 }
 
 const NO_IDS_WARNING = "Skylight returned no chore ids; list chores to confirm.";
-
-function stopReason(e: unknown): string | null {
-  if (e instanceof AuthError) return "authentication failed";
-  if (e instanceof SkylightApiError && e.status === 429) return "rate limited by Skylight";
-  return null;
-}
 
 async function findChore(ctx: ToolContext, frameId: string, choreId: string, seriesId: string, date: string | null): Promise<{ summary: string; routine: boolean } | null> {
   let after: string;
