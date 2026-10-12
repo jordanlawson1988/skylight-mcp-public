@@ -32,7 +32,9 @@ export interface Reward {
   /** True when redeemedAt is set. */
   redeemed: boolean;
 }
-export interface SkylightList { id: string; title: string; kind: ListKind | null; color: string | null; hiddenOnDevice: boolean; itemCount: number }
+export interface SkylightList { id: string; title: string; kind: ListKind | null; color: string | null; hiddenOnDevice: boolean;
+  /** Null when the response carried no list_items relationship (unknown, not zero). */
+  itemCount: number | null }
 export interface ListItem { id: string; title: string; done: boolean; section: string | null; position: number | null }
 export interface CalendarEvent {
   /** As listed: a master/one-off id, or `<masterId>-<unixSeconds>` for one occurrence of a recurring event. */
@@ -167,7 +169,7 @@ export function mapList(resource: unknown): SkylightList | null {
   const items = rec(rec(r.relationships).list_items).data;
   return {
     id, title, kind: LIST_KINDS.find((k) => k === kind) ?? null, color: str(a.color), hiddenOnDevice: bool(a.hide_on_device) ?? false,
-    itemCount: Array.isArray(items) ? items.length : 0,
+    itemCount: Array.isArray(items) ? items.length : null,
   };
 }
 

@@ -128,10 +128,17 @@ export function registerListTools(server: McpServer, ctx: ToolContext): void {
       if (args.confirm !== true) {
         const list = mapList(dataOf(await ctx.client.request({ method: "GET", path: `${listsPath(frameId)}/${id}` })));
         if (!list) throw new ValidationError("listId", "Skylight returned no list with that id");
+        let itemCount = list.itemCount;
+        if (itemCount === null) {
+          // The list response had no item relationship: count the items instead; a failed read leaves the count unknown.
+          try { itemCount = mapListItems(await ctx.client.request({ method: "GET", path: itemsPath(frameId, id) })).length; }
+          catch (e) { if (!(e instanceof SkylightApiError)) throw e; }
+        }
+        const items = itemCount === null ? "an unknown number of items" : `its ${itemCount} ${itemCount === 1 ? "item" : "items"}`;
         return {
           confirmed: false,
-          wouldDelete: { id: list.id, title: list.title, kind: list.kind, itemCount: list.itemCount },
-          message: `Nothing was deleted. This would delete the list "${list.title}" and its ${list.itemCount} ${list.itemCount === 1 ? "item" : "items"}. Ask the user to confirm, then call again with confirm: true.`,
+          wouldDelete: { id: list.id, title: list.title, kind: list.kind, itemCount },
+          message: `Nothing was deleted. This would delete the list "${list.title}" and ${items}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }
       await ctx.client.request({ method: "DELETE", path: `${listsPath(frameId)}/${id}` });
@@ -254,8 +261,12 @@ export function registerListTools(server: McpServer, ctx: ToolContext): void {
       const ids = args.itemIds.map((i) => assertNumericId(i, "itemIds"));
       if (new Set(ids).size !== ids.length) throw new ValidationError("itemIds", "must not repeat");
       const frameId = await ctx.frames.resolve();
-      if (args.confirm !== true) {
-        const byId = new Map(mapListItems(await ctx.client.request({ method: "GET", path: itemsPath(frameId, listId) })).map((i) => [i.id, i]));
+      // One read serves both the preview and the confirm-time check that every id is still on this list.
+      const byId = new Map(mapListItems(await ctx.client.request({ method: "GET", path: itemsPath(frameId, listId) })).map((i) => [i.id, i]));
+      if (args.confirm === true) {
+        const missing = ids.find((i) => !byId.has(i));
+        if (missing !== undefined) throw new ValidationError("itemIds", `${missing} is not in this list`);
+      } else {
         const items = ids.flatMap((id) => { const hit = byId.get(id); return hit ? [{ id, title: hit.title }] : []; });
         const notFound = ids.filter((id) => !byId.has(id));
         return {

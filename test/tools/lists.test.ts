@@ -86,6 +86,32 @@ test("delete list previews title and item count, then deletes on confirm", async
   await t.close();
 });
 
+test("delete list preview with an unknown item count fetches the items, or says the count is unknown", async () => {
+  const noRel = { id: "9", type: "list", attributes: { label: "Groceries", kind: "shopping", color: "#42D792", hide_on_device: false } };
+  const t = await connectTestClient([FRAMES,
+    { method: "GET", path: "/api/frames/77/lists/9", json: { data: noRel } },
+    { method: "GET", path: "/api/frames/77/lists/9/list_items", json: { data: [item(1, "Milk"), item(2, "Bread")] } }]);
+  const r = await t.callTool("skylight_delete_list", { listId: "9" });
+  assert.equal((r.data as { wouldDelete: { itemCount: number } }).wouldDelete.itemCount, 2);
+  assert.match((r.data as { message: string }).message, /2 items/);
+  await t.close();
+  const t2 = await connectTestClient([FRAMES,
+    { method: "GET", path: "/api/frames/77/lists/9", json: { data: noRel } },
+    { method: "GET", path: "/api/frames/77/lists/9/list_items", status: 500, text: "boom" }]);
+  const r2 = await t2.callTool("skylight_delete_list", { listId: "9" });
+  assert.equal(r2.isError, false);
+  assert.equal((r2.data as { wouldDelete: { itemCount: number | null } }).wouldDelete.itemCount, null);
+  assert.match((r2.data as { message: string }).message, /unknown number of items/);
+  assert.equal(writes(t2).length, 0);
+  await t2.close();
+});
+
+test("list lists reports a null itemCount when the relationship is absent", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/lists", json: { data: [{ id: "9", attributes: { label: "x", kind: "other", color: "#000000", hide_on_device: false } }] } }]);
+  assert.equal(((await t.callTool("skylight_list_lists")).data as Array<{ itemCount: number | null }>)[0]!.itemCount, null);
+  await t.close();
+});
+
 test("add list items posts one item per call, sequentially, with label and section", async () => {
   let n = 100;
   const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/lists/5/list_items", handler: ({ body }) => ({ json: { data: item(++n, (body as { label: string }).label) } }) }]);
@@ -198,6 +224,17 @@ test("delete list items previews the titles from one read, then bulk_destroys wi
   assert.deepEqual(done.data, { deleted: true, listId: "5", ids: ["1", "3"] });
   assert.equal(writes(t).length, 1);
   assert.deepEqual(writes(t)[0]!.body, { ids: [1, 3] });
+  await t.close();
+});
+
+test("delete list items with confirm re-reads the list and refuses if any id is missing, before bulk_destroy", async () => {
+  const t = await connectTestClient([FRAMES,
+    { method: "GET", path: "/api/frames/77/lists/5/list_items", json: { data: [item(1, "Milk"), item(2, "Bread")] } },
+    { method: "DELETE", path: "/api/frames/77/lists/5/list_items/bulk_destroy", json: {} }]);
+  const r = await t.callTool("skylight_delete_list_items", { listId: "5", itemIds: ["1", "99"], confirm: true });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /^Invalid input\. itemIds: 99 is not in this list/);
+  assert.equal(writes(t).length, 0);
   await t.close();
 });
 

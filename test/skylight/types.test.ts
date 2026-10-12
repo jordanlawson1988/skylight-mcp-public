@@ -170,8 +170,9 @@ test("mapLists reads the live list fixture: kind, color, hide_on_device and the 
 });
 
 test("mapList tolerates a missing relationship and unknown kinds, and rejects resources without a label", () => {
-  assert.deepEqual(mapList({ id: "9", attributes: { label: "Misc", kind: "weird", hide_on_device: true } }), { id: "9", title: "Misc", kind: null, color: null, hiddenOnDevice: true, itemCount: 0 });
+  assert.deepEqual(mapList({ id: "9", attributes: { label: "Misc", kind: "weird", hide_on_device: true } }), { id: "9", title: "Misc", kind: null, color: null, hiddenOnDevice: true, itemCount: null });
   assert.equal(mapList({ id: "9", attributes: {} }), null);
+  assert.equal(mapList({ id: "9", attributes: { label: "x" }, relationships: { list_items: { data: [] } } })!.itemCount, 0);
   assert.deepEqual(mapLists(null), []);
 });
 
