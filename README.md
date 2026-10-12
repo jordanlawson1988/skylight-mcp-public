@@ -35,9 +35,13 @@ npm link
 skylight-mcp login
 ```
 
-The command prints a link to Skylight's authorize page. Open it in a browser. The page needs Skylight's own server-side sign-in, not the session from the Skylight web app, so you may be asked to sign in even if the web app is already open. After you sign in, the browser lands on `https://ourskylight.com/welcome?code=...`. Copy the full address from the address bar and paste it into the terminal prompt.
+The command prints a link to Skylight's authorize page. Open it in Chrome and sign in. The page needs Skylight's own server-side sign-in, not the session from the Skylight web app, so you may be asked to sign in even if the web app is already open.
 
-If a login was started earlier and you only have the final URL, run `skylight-mcp login --complete <url>` to finish it. `--pkce S256|plain` selects the PKCE method (default `S256`).
+After sign-in, Skylight sends the browser to `https://ourskylight.com/welcome?code=...` and then immediately redirects to its home page, so you usually cannot copy the callback address from the address bar. That is fine. Go back to the terminal and press Enter. The CLI then looks in Chrome's local history for that one URL and finishes the login.
+
+What that lookup does: it reads only history entries whose URL starts with `https://ourskylight.com/welcome?code=` and that were visited after the login started. It copies Chrome's `History` database to a private temp directory (mode 0700), queries the copy with the macOS `/usr/bin/sqlite3` in read-only mode, and deletes the copy afterwards. Nothing else in your history is read, and the URL is never printed or logged. This only works with Google Chrome.
+
+If you would rather paste the address (or you use another browser), paste the full `https://ourskylight.com/welcome?code=...` address at the prompt instead of pressing Enter. If a login was started earlier and you have the final URL, run `skylight-mcp login --complete <url>` to finish it. `--pkce S256|plain` selects the PKCE method (default `S256`).
 
 Check the result with `skylight-mcp status`. It shows whether you are logged in, the API host, the token expiry and the frame in use.
 

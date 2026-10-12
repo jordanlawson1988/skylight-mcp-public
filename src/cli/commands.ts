@@ -1,5 +1,6 @@
 import type { Runtime } from "../runtime.js";
 import { AuthError } from "../skylight/errors.js";
+import { findCallbackInChromeHistory } from "./chrome-history.js";
 import { buildAuthorizeUrl, createPendingLogin, exchangeCode, parseCallbackUrl, type PkceMethod } from "../skylight/oauth.js";
 
 export async function startLogin(rt: Runtime, opts: { method?: PkceMethod } = {}): Promise<{ url: string }> {
@@ -16,6 +17,21 @@ export async function completeLogin(rt: Runtime, callbackUrl: string): Promise<{
   await rt.store.write(credential);
   await rt.store.deletePendingLogin();
   return { expiresAt: credential.expiresAt };
+}
+
+export const NO_CHROME_CALLBACK_MESSAGE =
+  "No Skylight sign-in found in Chrome's history since this login started. Sign in with the link above in Chrome, then run `skylight-mcp login` again and press Enter \u2014 or paste the callback address with `skylight-mcp login --complete <url>`.";
+
+/** Finish a pending login using the callback URL recovered from Chrome's history (Enter at the prompt). */
+export async function completeLoginFromChrome(
+  rt: Runtime,
+  find: (o: { since: number }) => Promise<string | null> = findCallbackInChromeHistory,
+): Promise<{ expiresAt: number }> {
+  const pending = await rt.store.readPendingLogin();
+  if (pending === null) throw new AuthError("No login in progress. Run `skylight-mcp login` first.");
+  const callback = await find({ since: pending.createdAt });
+  if (callback === null) throw new AuthError(NO_CHROME_CALLBACK_MESSAGE);
+  return completeLogin(rt, callback);
 }
 
 export function logout(rt: Runtime): Promise<boolean> {

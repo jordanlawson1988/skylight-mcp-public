@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startLogin, completeLogin, logout, status } from "../../src/cli/commands.js";
+import { startLogin, completeLogin, completeLoginFromChrome, NO_CHROME_CALLBACK_MESSAGE, logout, status } from "../../src/cli/commands.js";
 import { createRuntime, assertMacOS } from "../../src/runtime.js";
 import { createFakeKeychain } from "../helpers/fake-keychain.js";
 import { createMockFetch, type MockRoute } from "../helpers/mock-fetch.js";
@@ -104,5 +104,34 @@ test("logout removes credential", async () => {
   await runtime.store.write({ version: 1, accessToken: "AT", refreshToken: "RT", fingerprint: "f", expiresAt: 1 });
   assert.equal(await logout(runtime), true);
   assert.equal(await runtime.store.read(), null);
+  await cleanup();
+});
+
+test("completeLoginFromChrome looks up the callback since the pending login started and exchanges it", async () => {
+  const { runtime, cleanup } = await rt([
+    { method: "POST", path: "/oauth/token", json: { access_token: "AT", refresh_token: "RT", expires_in: 3600 } },
+  ]);
+  const { url } = await startLogin(runtime);
+  const state = new URL(url).searchParams.get("state")!;
+  const pending = (await runtime.store.readPendingLogin())!;
+  let since = 0;
+  const r = await completeLoginFromChrome(runtime, async (o) => { since = o.since; return `https://ourskylight.com/welcome?code=C&state=${state}`; });
+  assert.equal(since, pending.createdAt);
+  assert.ok(r.expiresAt > Date.now());
+  assert.equal((await runtime.store.read())!.accessToken, "AT");
+  await cleanup();
+});
+
+test("completeLoginFromChrome reports a clear error when Chrome has no callback, and keeps the pending login", async () => {
+  const { runtime, cleanup } = await rt([]);
+  await startLogin(runtime);
+  await assert.rejects(completeLoginFromChrome(runtime, async () => null), (e: Error) => e.message === NO_CHROME_CALLBACK_MESSAGE);
+  assert.ok(await runtime.store.readPendingLogin());
+  await cleanup();
+});
+
+test("completeLoginFromChrome without a pending login fails before searching", async () => {
+  const { runtime, cleanup } = await rt([]);
+  await assert.rejects(completeLoginFromChrome(runtime, async () => { throw new Error("should not search"); }), /skylight-mcp login/);
   await cleanup();
 });

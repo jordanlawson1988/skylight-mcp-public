@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
-import { completeLogin, logout, startLogin, status } from "./cli/commands.js";
+import { completeLogin, completeLoginFromChrome, logout, startLogin, status } from "./cli/commands.js";
 import { doctor } from "./cli/doctor.js";
 import { assertMacOS, createRuntime } from "./runtime.js";
 import { VERSION } from "./version.js";
@@ -29,8 +29,8 @@ async function promptCallback(): Promise<string> {
   const rl = createInterface({ input: stdin, output: stdout });
   try {
     const answer = await new Promise<string>((resolve, reject) => {
-      rl.once("close", () => reject(new Error("No callback URL was entered. Run `skylight-mcp login` again.")));
-      rl.question("3. Paste it here: ").then(resolve, reject);
+      rl.once("close", () => reject(new Error("Login prompt closed before finishing. Run `skylight-mcp login` again.")));
+      rl.question("   > ").then(resolve, reject);
     });
     return answer.trim();
   } finally {
@@ -55,9 +55,9 @@ async function main(argv: string[]): Promise<number> {
     }
     const method = arg(argv, "--pkce") === "plain" ? "plain" : "S256";
     const { url } = await startLogin(rt, { method });
-    stdout.write(`\n1. Open this link in your browser and sign in to Skylight:\n\n   ${url}\n\n2. After sign-in you land on https://ourskylight.com/welcome?code=...\n   Copy that full address from the address bar.\n\n`);
+    stdout.write(`\n1. Open this link in your browser and sign in to Skylight:\n\n   ${url}\n\n2. After sign-in, Skylight bounces you straight to its home page, so you\n   usually can't copy the callback address. That's fine: just come back here.\n\n3. Press Enter to finish (reads the sign-in result from Chrome's history),\n   or paste the https://ourskylight.com/welcome?code=... address if you have it:\n\n`);
     const callback = await promptCallback();
-    const { expiresAt } = await completeLogin(rt, callback);
+    const { expiresAt } = callback === "" ? await completeLoginFromChrome(rt) : await completeLogin(rt, callback);
     stdout.write(loggedInMessage(expiresAt));
     return 0;
   }
