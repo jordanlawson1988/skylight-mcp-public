@@ -1,6 +1,6 @@
 import { ID_PATTERN, parseChoreId, type ChoreRef } from "./ids.js";
 
-export interface Profile { id: string; name: string; color: string | null; isAdult: boolean | null }
+export interface Profile { id: string; name: string; color: string | null; linkedToProfile: boolean | null; onChoreChart: boolean | null }
 export interface Chore {
   id: string; summary: string; start: string | null; startTime: string | null; status: string | null;
   routine: boolean; recurring: boolean; recurrenceRule: string | null; rewardPoints: number | null; emoji: string | null; profileIds: string[];
@@ -46,9 +46,7 @@ export function mapProfiles(json: unknown): Profile[] {
     const a = rec(r.attributes);
     const name = str(a.label) ?? str(a.name);
     if (!id || !name) continue;
-    const type = str(a.profile_type);
-    const isAdult = bool(a.adult) ?? bool(a.is_adult) ?? (type ? type !== "child" : null);
-    out.push({ id, name, color: str(a.color), isAdult });
+    out.push({ id, name, color: str(a.color), linkedToProfile: bool(a.linked_to_profile), onChoreChart: bool(a.selected_for_chore_chart) });
   }
   return out;
 }

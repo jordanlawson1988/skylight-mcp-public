@@ -32,10 +32,10 @@ test("skylight_auth_status never leaks tokens", async () => {
 });
 
 test("skylight_list_profiles maps categories", async () => {
-  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/categories", json: { data: [{ id: "12", attributes: { label: "Ellie", color: "#f00", profile_type: "child" } }] } }]);
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/categories", json: { data: [{ id: "12", attributes: { label: "Ellie", color: "#f00", linked_to_profile: true, selected_for_chore_chart: false } }] } }]);
   const r = await t.callTool("skylight_list_profiles");
   assert.equal(r.isError, false);
-  assert.deepEqual(r.data, [{ id: "12", name: "Ellie", color: "#f00", isAdult: false }]);
+  assert.deepEqual(r.data, [{ id: "12", name: "Ellie", color: "#f00", linkedToProfile: true, onChoreChart: false }]);
   await t.close();
 });
 

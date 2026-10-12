@@ -4,12 +4,12 @@ import { mapProfiles, mapChores, mapRewardPoints, mapRewards } from "../../src/s
 
 test("mapProfiles reads JSON:API categories", () => {
   const out = mapProfiles({ data: [
-    { id: "12", type: "category", attributes: { label: "Ellie", color: "#ff0000", profile_type: "child" } },
-    { id: 13, type: "category", attributes: { name: "Jordan", color: null, adult: true } },
+    { id: "12", type: "category", attributes: { label: "Ellie", color: "#ff0000", linked_to_profile: true, selected_for_chore_chart: true } },
+    { id: 13, type: "category", attributes: { name: "Birthdays", color: null, linked_to_profile: false } },
   ] });
   assert.deepEqual(out, [
-    { id: "12", name: "Ellie", color: "#ff0000", isAdult: false },
-    { id: "13", name: "Jordan", color: null, isAdult: true },
+    { id: "12", name: "Ellie", color: "#ff0000", linkedToProfile: true, onChoreChart: true },
+    { id: "13", name: "Birthdays", color: null, linkedToProfile: false, onChoreChart: null },
   ]);
 });
 
