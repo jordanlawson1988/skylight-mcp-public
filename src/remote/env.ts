@@ -20,6 +20,9 @@ export interface RemoteEnv {
   SKYLIGHT_TOOLSETS?: string;
 }
 
+/** The one OAuth scope the server grants (advertised, approved on the consent page, required by nothing finer). */
+export const MCP_SCOPE = "skylight";
+
 /** Every secret the Worker needs, in the order `skylight-mcp remote setup` explains them. */
 export const REMOTE_SECRETS = ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] as const;
 export type RemoteSecret = (typeof REMOTE_SECRETS)[number];

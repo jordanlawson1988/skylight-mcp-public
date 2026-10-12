@@ -90,6 +90,8 @@ test("the event source and kind strings are quoted only in vocab.ts (description
   for (const f of sourceFiles(root).filter((n) => !n.endsWith(join("skylight", "vocab.ts")))) {
     readFileSync(f, "utf8").split("\n").forEach((line, i) => {
       if (line.includes("describe(") || line.includes("description:") || line.includes("instructions:")) return;
+      // The shared server's OAuth scope is also spelled "skylight": a different vocabulary, declared once in src/remote/env.ts.
+      if (/^export const MCP_SCOPE = "skylight";$/.test(line)) return;
       assert.ok(!/["'`](skylight|standard)["'`]/.test(line), `${f}:${i + 1} quotes an event vocab literal; import it from vocab.ts`);
     });
   }
