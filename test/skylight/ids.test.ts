@@ -93,7 +93,7 @@ test("parseEventId rejects anything that is not <digits> or <digits>-<digits>", 
 });
 
 test("assertDateTimeWithOffset accepts an explicit offset or Z, with or without seconds", () => {
-  for (const ok of ["2026-10-12T18:30:00-04:00", "2026-10-12T18:30-04:00", "2026-10-12T22:30:00Z", "2026-10-12T22:30:00+05:30"]) {
+  for (const ok of ["2026-10-12T18:30:00-04:00", "2026-10-12T18:30:00.000-04:00", "2026-10-12T22:30:00.5Z", "2026-10-12T18:30-04:00", "2026-10-12T22:30:00Z", "2026-10-12T22:30:00+05:30"]) {
     assert.equal(assertDateTimeWithOffset(ok, "startsAt"), ok);
   }
 });
@@ -105,7 +105,7 @@ test("assertDateTimeWithOffset explains why a bare datetime is refused", () => {
 });
 
 test("assertDateTimeWithOffset rejects impossible values and other shapes", () => {
-  for (const bad of ["2026-10-12", "2026-02-30T10:00:00Z", "2026-10-12T24:00:00Z", "2026-10-12T10:60:00Z", "2026-10-12T10:00:60Z", "2026-10-12T10:00:00+25:00", "2026-10-12T10:00:00+04:60", "2026-10-12 10:00:00Z", "nope", ""]) {
+  for (const bad of ["2026-10-12", "2026-02-30T10:00:00Z", "2026-10-12T24:00:00Z", "2026-10-12T10:60:00Z", "2026-10-12T10:00:60Z", "2026-10-12T10:00:00+25:00", "2026-10-12T10:00:00+04:60", "2026-10-12 10:00:00Z", "2026-10-12T10:00:00.Z", "2026-10-12T10:00:00.1234Z", "2026-10-12T10:00.5Z", "nope", ""]) {
     assert.throws(() => assertDateTimeWithOffset(bad, "endsAt"), (e: unknown) => e instanceof ValidationError && e.field === "endsAt", bad);
   }
 });

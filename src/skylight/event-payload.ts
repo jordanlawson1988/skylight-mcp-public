@@ -67,7 +67,8 @@ export function addHoursKeepingOffset(value: string, hours: number): string {
   const sign = offset === "Z" ? 0 : offset[0] === "-" ? -1 : 1;
   const offsetMinutes = offset === "Z" ? 0 : sign * (Number(offset.slice(1, 3)) * 60 + Number(offset.slice(4, 6)));
   const utc = Date.parse(value) + hours * HOUR_MS;
-  return `${new Date(utc + offsetMinutes * 60_000).toISOString().slice(0, 19)}${offset}`;
+  const fraction = /:\d{2}(\.\d{1,3})(?:Z|[+-]\d{2}:\d{2})$/.exec(value)?.[1] ?? "";
+  return `${new Date(utc + offsetMinutes * 60_000).toISOString().slice(0, 19)}${fraction}${offset}`;
 }
 
 function assertNotBefore(start: string, end: string, field: string): void {

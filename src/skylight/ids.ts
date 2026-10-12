@@ -105,9 +105,9 @@ export function assertHexColor(value: string, field: string): string {
   return value.toUpperCase();
 }
 
-const OFFSET_DATETIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(Z|[+-]\d{2}:\d{2})?$/;
+const OFFSET_DATETIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
 
-/** `YYYY-MM-DDTHH:mm(:ss)?` followed by `Z` or `+HH:mm`/`-HH:mm`. Skylight reads a bare datetime as UTC, so the offset is mandatory. */
+/** `YYYY-MM-DDTHH:mm(:ss(.SSS)?)?` followed by `Z` or `+HH:mm`/`-HH:mm`. Skylight reads a bare datetime as UTC, so the offset is mandatory. */
 export function assertDateTimeWithOffset(value: string, field: string): string {
   const m = typeof value === "string" ? OFFSET_DATETIME.exec(value) : null;
   if (!m) throw new ValidationError(field, "must be a datetime like 2026-10-12T18:30:00-04:00 (date, time and UTC offset)");

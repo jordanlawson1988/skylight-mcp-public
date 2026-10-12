@@ -27,7 +27,8 @@ function eventsFrom(json: unknown): CalendarEvent[] {
 
 /**
  * Find the event in a listing so we can see where it comes from. An occurrence id is looked up in a 3-day window around the
- * occurrence; a plain id in a window of a year either side of today. Not found or a failed lookup returns null: the server then decides.
+ * occurrence; a plain id in a window of a year either side of today. Fails OPEN when the event is simply not in the window (null: the server
+ * decides, which is the residual risk for events more than a year away) but fails CLOSED when the lookup request itself fails.
  */
 async function lookupEvent(ctx: ToolContext, frameId: string, ref: EventRef, id: string): Promise<CalendarEvent | null> {
   let after: string;
@@ -43,7 +44,7 @@ async function lookupEvent(ctx: ToolContext, frameId: string, ref: EventRef, id:
     const events = mapEvents(await ctx.client.request({ method: "GET", path: eventsPath(frameId), query: { date_min: after, date_max: before } }));
     return events.find((e) => e.id === id) ?? events.find((e) => e.masterId === ref.masterId) ?? null;
   } catch (e) {
-    if (e instanceof SkylightApiError) return null;
+    if (e instanceof SkylightApiError) throw new ValidationError("eventId", "could not verify whether this event comes from a synced calendar; try again");
     throw e;
   }
 }
@@ -79,7 +80,7 @@ const eventFieldShape = {
 };
 
 const deleteScope = z.enum(EXPOSED_APPLY_TO_VALUES as [string, ...string[]]).optional()
-  .describe("\"one\" = only this occurrence, \"future\" = this occurrence and all later ones (both need an occurrence id), \"all\" = the whole series. Omit for a one-off event or to delete a whole series by its plain id.");
+  .describe("\"one\" = only this occurrence, \"future\" = this occurrence and all later ones (both need an occurrence id), \"all\" = the whole series (sent as a delete of the master id). Omit for a one-off event or to delete a whole series by its plain id.");
 const updateScope = z.enum(EXPOSED_UPDATE_APPLY_TO_VALUES as [string, ...string[]]).optional()
   .describe("\"all\" = apply to the whole recurring series. Omit for one-off events. (Per-occurrence scopes are not available for update.)");
 
@@ -133,7 +134,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
     "skylight_update_event",
     {
       title: "Update a calendar event",
-      description: "Change fields on an event created in Skylight. Only the provided fields change. Datetimes need a UTC offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited. Events synced from Google or another calendar are refused: change them there.",
+      description: "Change fields on an event created in Skylight. Only the provided fields change. Datetimes need a UTC offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited, and an occurrence id with no applyTo still updates the whole series through its master id. Events synced from Google or another calendar are refused: change them there.",
       inputSchema: {
         eventId: eventIdSchema,
         title: z.string().optional().describe(`New title, up to ${MAX_EVENT_TITLE_LENGTH} characters.`),
@@ -179,15 +180,18 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       assertOwnEvent(found);
       const pathId = single ? args.eventId : ref.masterId;
       if (args.confirm !== true) {
-        const whole = applyTo === "all" ? found?.recurring !== false : applyTo === undefined && found?.recurring === true;
-        const scope = applyTo === "one" ? "only this occurrence" : applyTo === "future" ? "this occurrence and all later ones" : whole ? "the whole recurring series (every occurrence)" : "this event";
+        const scope = applyTo === "one" ? "only this occurrence"
+          : applyTo === "future" ? "this occurrence and all later ones"
+          : found === null ? "this event, and every occurrence if it is a recurring series (could not check)"
+          : found.recurring ? "the whole recurring series (every occurrence)"
+          : "this event";
         return {
           confirmed: false,
           wouldDelete: { id: args.eventId, masterId: ref.masterId, title: found?.title ?? null, startsAt: found?.startsAt ?? null, applyTo: applyTo ?? null, recurring: found?.recurring ?? null },
           message: `Nothing was deleted. This would delete ${scope}${found ? ` ("${found.title}")` : ""}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }
-      const json = await ctx.client.request<{ meta?: { destroyed_id?: unknown } } | null>({ method: "DELETE", path: `${eventsPath(frameId)}/${pathId}`, query: applyTo === undefined ? {} : { apply_to: applyTo } });
+      const json = await ctx.client.request<{ meta?: { destroyed_id?: unknown } } | null>({ method: "DELETE", path: `${eventsPath(frameId)}/${pathId}`, query: single ? { apply_to: applyTo } : {} });
       const destroyed = json?.meta?.destroyed_id;
       return { deleted: true, id: args.eventId, applyTo: applyTo ?? null, destroyedId: typeof destroyed === "string" || typeof destroyed === "number" ? String(destroyed) : null };
     })

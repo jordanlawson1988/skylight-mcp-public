@@ -183,7 +183,7 @@ test("update event: all-day dates imply all_day, profileIds and recurrence map t
   await t.close();
 });
 
-test("update event refuses a synced-calendar event with no PUT, and proceeds when the event is not found or the lookup fails", async () => {
+test("update event refuses a synced-calendar event with no PUT, and proceeds when the event is simply not found", async () => {
   const t = await connectTestClient([FRAMES, CATEGORIES, lookupRoute([synced]), { method: "PUT", path: /\/calendar_events\//, json: { data: ev("1", "x") } }]);
   const r = await t.callTool("skylight_update_event", { eventId: "11019627806-1791803100", title: "Nope" });
   assert.equal(r.isError, true);
@@ -193,13 +193,20 @@ test("update event refuses a synced-calendar event with no PUT, and proceeds whe
   const other = await t.callTool("skylight_update_event", { eventId: "11019627806", title: "Nope" });
   assert.match(other.text, /synced google calendar/);
   await t.close();
-  for (const lookup of [lookupRoute([]), lookupRoute("fail")]) {
-    const t2 = await connectTestClient([FRAMES, CATEGORIES, lookup, { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }]);
-    const ok = await t2.callTool("skylight_update_event", { eventId: "900", title: "Fine" });
-    assert.equal(ok.isError, false);
-    assert.equal(writes(t2).length, 1);
-    await t2.close();
-  }
+  const t2 = await connectTestClient([FRAMES, CATEGORIES, lookupRoute([]), { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }]);
+  const ok = await t2.callTool("skylight_update_event", { eventId: "900", title: "Fine" });
+  assert.equal(ok.isError, false);
+  assert.equal(writes(t2).length, 1);
+  await t2.close();
+});
+
+test("update event fails closed when the source lookup itself fails: no PUT", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, lookupRoute("fail"), { method: "PUT", path: /\/calendar_events\//, json: { data: ev("900", "x") } }]);
+  const r = await t.callTool("skylight_update_event", { eventId: "900", title: "Fine" });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /^Invalid input\. eventId: could not verify whether this event comes from a synced calendar; try again/);
+  assert.equal(writes(t).length, 0);
+  await t.close();
 });
 
 test("update event validation happens before any request", async () => {
@@ -239,7 +246,7 @@ test("delete event previews one occurrence, makes no request but the lookup, and
   await t.close();
 });
 
-test("delete event 'future' keeps the composite id; 'all' on an occurrence id deletes by master id", async () => {
+test("delete event 'future' keeps the composite id; 'all' on an occurrence id deletes by master id with no query", async () => {
   const t = await connectTestClient([FRAMES, lookupRoute([]),
     { method: "DELETE", path: /\/calendar_events\//, json: { meta: { destroyed_id: "x" } } }]);
   await t.callTool("skylight_delete_event", { eventId: "900-1791803100", applyTo: "future", confirm: true });
@@ -247,7 +254,11 @@ test("delete event 'future' keeps the composite id; 'all' on an occurrence id de
   assert.equal(writes(t)[0]!.url.searchParams.get("apply_to"), "future");
   await t.callTool("skylight_delete_event", { eventId: "900-1791803100", applyTo: "all", confirm: true });
   assert.equal(writes(t)[1]!.url.pathname, `${EVENTS}/900`);
-  assert.equal(writes(t)[1]!.url.searchParams.get("apply_to"), "all");
+  assert.equal(writes(t)[1]!.url.search, "");
+  const plainAll = await t.callTool("skylight_delete_event", { eventId: "900", applyTo: "all", confirm: true });
+  assert.equal(plainAll.isError, false);
+  assert.equal(writes(t)[2]!.url.pathname, `${EVENTS}/900`);
+  assert.equal(writes(t)[2]!.url.search, "");
   await t.close();
 });
 
@@ -267,6 +278,30 @@ test("delete event: a plain id without applyTo sends no apply_to, and the previe
   const p = await one.callTool("skylight_delete_event", { eventId: "901" });
   assert.match((p.data as { message: string }).message, /This would delete this event/);
   await one.close();
+});
+
+test("delete event preview after a lookup miss says it could not check and may cover a whole series", async () => {
+  const t = await connectTestClient([FRAMES, lookupRoute([]), { method: "DELETE", path: /\/calendar_events\//, json: {} }]);
+  for (const args of [{ eventId: "900" }, { eventId: "900", applyTo: "all" }, { eventId: "900-1791803100", applyTo: "all" }]) {
+    const r = await t.callTool("skylight_delete_event", args);
+    assert.equal(r.isError, false, JSON.stringify(args));
+    assert.match((r.data as { message: string }).message, /this event, and every occurrence if it is a recurring series \(could not check\)/, JSON.stringify(args));
+  }
+  const one = await t.callTool("skylight_delete_event", { eventId: "900-1791803100", applyTo: "one" });
+  assert.match((one.data as { message: string }).message, /only this occurrence/);
+  assert.equal(writes(t).length, 0);
+  await t.close();
+});
+
+test("delete event fails closed when the source lookup itself fails, in the preview and on confirm", async () => {
+  const t = await connectTestClient([FRAMES, lookupRoute("fail"), { method: "DELETE", path: /\/calendar_events\//, json: {} }]);
+  for (const confirm of [undefined, true]) {
+    const r = await t.callTool("skylight_delete_event", { eventId: "900", applyTo: "all", ...(confirm ? { confirm } : {}) });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /eventId: could not verify whether this event comes from a synced calendar; try again/);
+  }
+  assert.equal(writes(t).length, 0);
+  await t.close();
 });
 
 test("delete event: one/future need an occurrence id, an occurrence id needs applyTo, bad ids fail; no request at all", async () => {
