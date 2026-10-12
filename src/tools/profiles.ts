@@ -41,7 +41,7 @@ async function countUpcomingChores(ctx: ToolContext, frameId: string, profileId:
  * Problem text per id that is not a person profile on this frame (a label, or unknown), or null when the categories
  * lookup failed or returned no parseable profiles (the guard is a convenience and must never block a write).
  */
-export async function personProfileProblems(ctx: ToolContext, frameId: string, ids: readonly string[]): Promise<Map<string, string> | null> {
+export async function personProfileProblems(ctx: ToolContext, frameId: string, ids: readonly string[], opts: { allowLabels?: boolean } = {}): Promise<Map<string, string> | null> {
   let profiles: Profile[];
   try {
     profiles = mapProfiles(await ctx.client.request({ method: "GET", path: categoriesPath(frameId) }));
@@ -56,7 +56,7 @@ export async function personProfileProblems(ctx: ToolContext, frameId: string, i
   for (const id of ids) {
     const p = byId.get(id);
     if (!p) problems.set(id, `${id} is not a profile on this frame`);
-    else if (isLabelKind(p.kind)) problems.set(id, `${id} (${p.name}) is a label, not a person profile`);
+    else if (opts.allowLabels !== true && isLabelKind(p.kind)) problems.set(id, `${id} (${p.name}) is a label, not a person profile`);
   }
   return problems;
 }
@@ -64,6 +64,13 @@ export async function personProfileProblems(ctx: ToolContext, frameId: string, i
 /** Throws ValidationError(field) when an id is a label (Birthdays etc.) or unknown on this frame. A failed lookup skips the check. */
 export async function assertPersonProfiles(ctx: ToolContext, frameId: string, ids: string[], field: string): Promise<void> {
   const problems = await personProfileProblems(ctx, frameId, ids);
+  const first = problems === null ? undefined : ids.map((id) => problems.get(id)).find((m) => m !== undefined);
+  if (first !== undefined) throw new ValidationError(field, first);
+}
+
+/** Like assertPersonProfiles, but a label such as Birthdays is fine (calendar events can belong to labels). Unknown ids still fail. */
+export async function assertProfilesExist(ctx: ToolContext, frameId: string, ids: string[], field: string): Promise<void> {
+  const problems = await personProfileProblems(ctx, frameId, ids, { allowLabels: true });
   const first = problems === null ? undefined : ids.map((id) => problems.get(id)).find((m) => m !== undefined);
   if (first !== undefined) throw new ValidationError(field, first);
 }
