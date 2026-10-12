@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "id": "88",
+      "type": "device",
+      "attributes": {
+        "name": "Family Calendar",
+        "timezone": "America/New_York",
+        "activated": true,
+        "category_id": null,
+        "role": null,
+        "brightness": 255,
+        "slideshow_speed": 10,
+        "slideshow_style": 0,
+        "start_sound": false,
+        "show_caption": true,
+        "show_heart": false,
+        "blur_effect": true,
+        "current_album_id": -1,
+        "sleeps_at": "21:00",
+        "wakes_at": "06:00",
+        "currently_sleeping": false,
+        "sleep_mode_on": false,
+        "side_by_side": false,
+        "sleep_mode": "screen_off",
+        "sleep_sound": null,
+        "sleep_sound_volume": 70,
+        "nightlight": false,
+        "nightlight_brightness": 65,
+        "nightlight_color": "off",
+        "notify_on_new_photos": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "data": {
+    "id": "77",
+    "type": "frame_show",
+    "attributes": {
+      "name": "familyframe",
+      "open_to_public": false,
+      "message_viewability": "only_viewable_to_owner",
+      "apps": [
+        "calendar"
+      ],
+      "timezone": "America/New_York",
+      "destroyed_at": null,
+      "household_name": null,
+      "locale": "en",
+      "feature_bundle": {
+        "chores": {
+          "enabled": true
+        },
+        "dinner_plans": {
+          "enabled": false
+        },
+        "lists": {
+          "enabled": true
+        },
+        "countdowns": {
+          "enabled": true
+        },
+        "albums": {
+          "enabled": true
+        },
+        "character_customization": {
+          "enabled": true
+        },
+        "character_accessories": {
+          "enabled": true
+        },
+        "captions": {
+          "enabled": true
+        },
+        "doodles": {
+          "enabled": true
+        },
+        "greeting_cards": {
+          "enabled": true
+        },
+        "magic_import": {
+          "enabled": true
+        },
+        "meal_planning": {
+          "enabled": true,
+          "unsupported_hardware": false
+        },
+        "nudges": {
+          "enabled": true
+        },
+        "photos": {
+          "enabled": true
+        },
+        "remote_settings": {
+          "enabled": true
+        },
+        "rewards": {
+          "enabled": true,
+          "unsupported_hardware": false
+        },
+        "screensaver": {
+          "enabled": true
+        },
+        "sidekick": {
+          "enabled": true
+        },
+        "app_slideshow": {
+          "enabled": true
+        },
+        "timers": {
+          "enabled": true
+        },
+        "videos": {
+          "enabled": true
+        },
+        "recipes": {
+          "enabled": true
+        },
+        "disney": {
+          "enabled": true
+        },
+        "habit_tracking": {
+          "enabled": true
+        },
+        "bundle_name": "cal_plus",
+        "bundle_names": [
+          "cal_plus"
+        ]
+      },
+      "brightness": 255,
+      "slideshow_speed": 10,
+      "slideshow_style": 0,
+      "sleeps_at": "21:00",
+      "wakes_at": "06:00",
+      "currently_sleeping": false,
+      "sleep_mode_on": false,
+      "start_sound": false,
+      "show_caption": true,
+      "show_heart": false,
+      "blur_effect": true,
+      "current_album_id": -1,
+      "side_by_side": false,
+      "notify_on_new_photos": false,
+      "notification_email": null,
+      "gift_status": "not_a_gift",
+      "activated": true,
+      "share_token": null,
+      "activated_at": "2025-12-28T18:16:17.990Z",
+      "mine": true,
+      "plus": true,
+      "trialing": false,
+      "trial_expires_at": null,
+      "user_created_at": "2025-12-06T01:31:33.121Z",
+      "access": "approved",
+      "gift_recipient_name": null,
+      "assistant_household_id": null,
+      "plus_trial_offers": [],
+      "owner_name": null,
+      "owner_birthday": null,
+      "hardware_model": "27-CAL-1.0"
+    },
+    "relationships": {
+      "user": {
+        "data": {
+          "id": "12311021",
+          "type": "user"
+        }
+      },
+      "event_notification_setting": {
+        "data": {
+          "id": "9410715",
+          "type": "event_notification_setting"
+        }
+      },
+      "devices": {
+        "data": [
+          {
+            "id": "88",
+            "type": "device"
+          }
+        ]
+      },
+      "profile": {
+        "data": null
+      }
+    }
+  },
+  "meta": {
+    "bulk_features": false,
+    "trial_days_remaining": null,
+    "ab_test_group": "list-blur"
+  },
+  "included": [
+    {
+      "id": "88",
+      "type": "device",
+      "attributes": {
+        "name": "Family Calendar",
+        "timezone": "America/New_York",
+        "activated": true,
+        "category_id": null,
+        "role": null,
+        "brightness": 255,
+        "slideshow_speed": 10,
+        "slideshow_style": 0,
+        "start_sound": false,
+        "show_caption": true,
+        "show_heart": false,
+        "blur_effect": true,
+        "current_album_id": -1,
+        "sleeps_at": "21:00",
+        "wakes_at": "06:00",
+        "currently_sleeping": false,
+        "sleep_mode_on": false,
+        "side_by_side": false,
+        "sleep_mode": "screen_off",
+        "sleep_sound": null,
+        "sleep_sound_volume": 70,
+        "nightlight": false,
+        "nightlight_brightness": 65,
+        "nightlight_color": "off",
+        "notify_on_new_photos": false
+      }
+    }
+  ]
+}

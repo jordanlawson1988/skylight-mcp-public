@@ -1,0 +1,1 @@
+{ "data": [ { "id": "3001", "type": "album_with_messages", "attributes": { "title": "Summer", "kind": "standard", "editable": true, "exclude_from_slideshow": false, "thumbnails": [], "photos_count": 1, "videos_count": 0 }, "relationships": { "messages": { "data": [ { "id": "1794275894", "type": "message" } ] } } } ] }

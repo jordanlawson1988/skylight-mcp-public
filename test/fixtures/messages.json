@@ -1,0 +1,54 @@
+{
+  "data": [
+    {
+      "id": "1794275894",
+      "type": "message_asset",
+      "attributes": {
+        "asset_type": "photo",
+        "asset_key": "asset-0.jpg",
+        "thumbnail_key": null,
+        "asset_bucket": "example-bucket",
+        "created_at": "2026-07-10T18:27:09.554Z",
+        "frame_name": "familyframe",
+        "from_email": "user@example.invalid",
+        "destroyed_at": null,
+        "caption": "",
+        "comments_count": 0,
+        "asset_url": "https://example.invalid/asset",
+        "month_in_review_display_date": null,
+        "frame_id": 77,
+        "frame_owner_id": 12311021,
+        "sender_id": 13293082,
+        "thumbnail_url": "https://example.invalid/asset"
+      }
+    },
+    {
+      "id": "1794275814",
+      "type": "message_asset",
+      "attributes": {
+        "asset_type": "photo",
+        "asset_key": "asset-1.jpg",
+        "thumbnail_key": null,
+        "asset_bucket": "example-bucket",
+        "created_at": "2026-07-10T18:27:03.501Z",
+        "frame_name": "familyframe",
+        "from_email": "user@example.invalid",
+        "destroyed_at": null,
+        "caption": "Beach day",
+        "comments_count": 0,
+        "asset_url": "https://example.invalid/asset",
+        "month_in_review_display_date": null,
+        "frame_id": 77,
+        "frame_owner_id": 12311021,
+        "sender_id": 13293082,
+        "thumbnail_url": "https://example.invalid/asset"
+      }
+    }
+  ],
+  "meta": {
+    "frame_owner": true,
+    "trial_days_remaining": null,
+    "current_page": 1,
+    "num_pages": 2
+  }
+}
