@@ -19,6 +19,18 @@ Nothing is guaranteed by Skylight.
   Attribute names used by the web app: `label` (display name), `color`, `emoji`,
   `selected_for_chore_chart`, `linked_to_profile`, `profile_picture_urls`. Verified live 2026-10-12: there is no adult/child flag at all, so the tool exposes `kind` ("profile" when `linked_to_profile` is true, "label" otherwise) and `onChoreChart` instead.
 
+## Profiles (categories)
+
+Source tags: [bundle] read from the Skylight web app bundle, [live] observed on a real frame. Unmarked write behavior is unverified until the live smoke has run.
+
+- List: `GET /api/frames/{f}/categories` → `{ data: [{ id, type: "category", attributes: { id, label, color, selected_for_chore_chart, linked_to_profile, profile_picture_urls } }] }` [live]. No emoji, birthday or adult field on categories [live]. A person ("profile") has `linked_to_profile: true`; a calendar "label" (e.g. Birthdays) has `linked_to_profile: false` [live].
+- Get one: `GET /api/frames/{f}/categories/{id}` exists [bundle].
+- Create: `POST /api/frames/{f}/categories` body `{ label, color, linked_to_profile, selected_for_chore_chart }`; the web app always sets `selected_for_chore_chart` equal to `linked_to_profile` [bundle]. Optional query `link_own_profile=true` links the category to the signed-in user; the MCP does not expose it [bundle].
+- Update: `PUT /api/frames/{f}/categories/{id}` with any of `{ label, color, linked_to_profile, selected_for_chore_chart }`; when `linked_to_profile` is sent, the web app sends `selected_for_chore_chart` with the same value. "Convert to label" in the app is `linked_to_profile: false` [bundle].
+- Delete: `DELETE /api/frames/{f}/categories/{id}` with optional query `reassign_to_category_id=<other id>`, which moves the deleted category's chores and events to that category [bundle]. The app's UI only offers delete for labels and "Convert to Label" for profiles; whether the API deletes a profile is unverified (the live smoke tests it).
+- Color is a hex string like `#CB434C` [live].
+- MCP mapping: `kind` is "profile" or "label" (`PROFILE_KINDS` in `src/skylight/vocab.ts`); `skylight_delete_profile` previews without `confirm: true`.
+
 ## Chores and routines
 
 - List: `GET /api/frames/{frameId}/chores?after=&before=&include_late=&include_up_for_grabs=&filter=linked_to_profile`

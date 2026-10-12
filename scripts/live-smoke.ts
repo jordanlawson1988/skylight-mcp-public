@@ -1,9 +1,10 @@
 // Opt-in live checks against the real Skylight API using the stored credential.
-// Read-only by default. SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all).
+// Read-only by default. SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), then a profile (create, update, assign a chore, delete, verify gone).
 import { createRuntime, assertMacOS, type Runtime } from "../src/runtime.js";
 import { listProfiles } from "../src/tools/profiles.js";
-import { mapChore, mapChores, mapRewardPoints } from "../src/skylight/types.js";
+import { mapChore, mapChores, mapProfile, mapProfiles, mapRewardPoints } from "../src/skylight/types.js";
 import { buildChoreCreateBody } from "../src/skylight/chore-payload.js";
+import { buildProfileCreateBody, buildProfileUpdateBody } from "../src/skylight/profile-payload.js";
 import { localDateString } from "../src/skylight/ids.js";
 import { CHORE_STATUS } from "../src/skylight/vocab.js";
 
@@ -50,6 +51,23 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
   // Series ids we still need to clean up: id -> whether the chore is recurring.
   const live = new Map<string, boolean>();
   let leftoverCount = 0;
+  let leftoverProfiles = 0;
+  const catBase = `/api/frames/${frameId}/categories`;
+  const smokeProfiles = async () => mapProfiles(await rt.client.request({ method: "GET", path: catBase })).filter((p) => p.name.startsWith(PREFIX));
+  // Delete a profile; if the API refuses, convert it to a label (linked_to_profile: false) and delete again.
+  const deleteProfile = async (id: string): Promise<string> => {
+    try {
+      await rt.client.request({ method: "DELETE", path: `${catBase}/${id}` });
+      return "deleted directly";
+    } catch (e) {
+      console.log("profile delete refused:", e instanceof Error ? e.message : e);
+      await rt.client.request({ method: "PUT", path: `${catBase}/${id}`, body: buildProfileUpdateBody({ kind: "label" }) });
+      await rt.client.request({ method: "DELETE", path: `${catBase}/${id}` });
+      return "converted to label, then deleted";
+    }
+  };
+  let smokeProfileId: string | null = null;
+  let profileChoreId: string | null = null;
   try {
     // One-time chore: create, update, complete (status only), revert, delete (no apply_to).
     const once = await create(`${PREFIX} once ${stamp}`);
@@ -92,7 +110,38 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
     const gone = await list(today, addDays(today, 3));
     if (gone.some((c) => c.summary.includes(stamp))) throw new Error("smoke chores still listed after apply_to=all");
     step("list shows none of the smoke chores");
+
+    // Profile: create, update, assign a one-time chore, delete without reassign, verify gone.
+    const created = mapProfile(((await rt.client.request<unknown>({ method: "POST", path: catBase, body: buildProfileCreateBody({ name: `${PREFIX} ${stamp}`, color: "#123456", kind: "profile" }) })) as { data?: unknown } | null)?.data);
+    if (!created) throw new Error("profile create returned no profile; inspect response shape");
+    smokeProfileId = created.id;
+    if (created.kind !== "profile") throw new Error(`created profile came back with kind=${String(created.kind)}`);
+    step(`profile created ${created.id}`);
+    const renamed = `${PREFIX} ${stamp} (updated)`;
+    await rt.client.request({ method: "PUT", path: `${catBase}/${created.id}`, body: buildProfileUpdateBody({ name: renamed, color: "#abcdef" }) });
+    const afterUpdate = (await smokeProfiles()).find((p) => p.id === created.id);
+    if (!afterUpdate || afterUpdate.name !== renamed || afterUpdate.color?.toUpperCase() !== "#ABCDEF") throw new Error(`profile update not reflected: ${JSON.stringify(afterUpdate)}`);
+    step("profile updated (name + color)");
+    const pchore = await create(`${PREFIX} profile chore ${stamp}`, { profileIds: [created.id] });
+    profileChoreId = pchore.seriesId;
+    step(`profile chore created ${pchore.seriesId}`);
+    const how = await deleteProfile(created.id);
+    smokeProfileId = null;
+    step(`profile ${how}`);
+    if ((await smokeProfiles()).some((p) => p.id === created.id)) throw new Error("smoke profile still listed after delete");
+    step("profile gone from the list");
+    const choreGone = !(await list(today, addDays(today, 3), true)).some((c) => c.seriesId === pchore.seriesId);
+    console.log(choreGone ? "profile chore disappeared with its profile" : "NOTE: profile chore still listed after its profile was deleted");
+    step(`profile chore ${choreGone ? "removed with profile" : "survived profile delete"}`);
   } finally {
+    if (profileChoreId !== null) {
+      try { await rt.client.request({ method: "DELETE", path: `${base}/${profileChoreId}` }); console.log("cleanup deleted profile chore", profileChoreId); }
+      catch { /* usually already gone with its profile */ }
+    }
+    if (smokeProfileId !== null) {
+      try { console.log("cleanup profile", smokeProfileId, await deleteProfile(smokeProfileId)); }
+      catch (e) { console.error("cleanup FAILED for profile", smokeProfileId, e instanceof Error ? e.message : e); }
+    }
     for (const [id, recurring] of live) {
       try {
         await rt.client.request({ method: "DELETE", path: `${base}/${id}`, ...(recurring ? { query: { apply_to: "all" } } : {}) });
@@ -109,7 +158,16 @@ async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today
     } catch (e) {
       console.error("leftover check failed:", e instanceof Error ? e.message : e);
     }
+    try {
+      const leftover = await smokeProfiles();
+      leftoverProfiles = leftover.length;
+      if (leftover.length > 0) console.error("LEFTOVER smoke profiles:", leftover.map((p) => `${p.name}:${p.id}`).join(", "));
+      else console.log("no leftover smoke profiles");
+    } catch (e) {
+      console.error("profile leftover check failed:", e instanceof Error ? e.message : e);
+    }
   }
+  if (leftoverProfiles > 0) throw new Error(`${leftoverProfiles} smoke profile(s) left behind; delete them in the Skylight app or with skylight_delete_profile`);
   if (leftoverCount > 0) throw new Error(`${leftoverCount} smoke chore(s) left behind; the ids may be from a prior run; delete them in the Skylight app or with skylight_delete_chore`);
   console.log(`write smoke OK (${steps.join("; ")})`);
 }

@@ -8,8 +8,9 @@ This is an unofficial project. It is not affiliated with or endorsed by Skylight
 
 ## Safety
 
-- The tool set is narrow. There are no tools for accounts, devices, photos, calendar events, lists or meals.
+- The tool set is narrow. There are no tools for accounts, devices, photos, calendar events, lists or meals. Never exposed: account delete or export, email or password change, frame transfer. Other areas are reserved for later phases, each destructive action confirm-gated. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can now be created, updated and deleted.
 - Deleting a chore requires `confirm: true`. Without it, `skylight_delete_chore` changes nothing and returns a preview of what would be deleted.
+- Deleting a profile works the same way: `skylight_delete_profile` needs `confirm: true`, and its preview shows the upcoming chore count and where chores and events would go. To retire a person without losing their events, use `skylight_update_profile` with `kind: "label"` (Skylight's "Convert to Label").
 - Bulk create validates every item before sending any request, supports `dryRun: true`, and stops early if Skylight rejects the login or rate limits the requests.
 - Tokens are stored encrypted with AES-256-GCM. The encryption key lives in the macOS Keychain.
 - Tokens, codes and keys are never written to logs and never returned in tool results. `status` and `doctor` print no token values.
@@ -72,6 +73,9 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | --- | --- |
 | `skylight_auth_status` | Reports login state, API host, frame and token expiry. Never returns secrets. |
 | `skylight_list_profiles` | Lists family profiles and their ids. Chores and points are assigned by profile id. |
+| `skylight_create_profile` | Creates a profile (`kind: "profile"`, a person with a chore-chart column, the default) or a label (`kind: "label"`, a calendar category such as Birthdays). Needs `name` and a `#RRGGBB` `color`. |
+| `skylight_update_profile` | Changes a profile's `name`, `color` or `kind`. Only the fields you pass change. `kind: "label"` is Skylight's "Convert to Label", the non-destructive way to retire a person; the profile keeps its events. |
+| `skylight_delete_profile` | Deletes a profile or label. Returns a preview and changes nothing unless `confirm: true` is set. Optional `reassignToProfileId` moves its chores and events to another profile instead of deleting them. |
 | `skylight_list_chores` | Lists chores and routine steps in a date range (default today through 14 days ahead), sorted by `instanceDate` then summary. Overdue occurrences are only included with `includeLate: true` (default false; can be large). Recurring occurrences carry a `seriesId` and an `instanceDate`; ids of later occurrences look like `123-2026-10-13`. |
 | `skylight_create_chore` | Creates one chore or routine step for one or more profiles. Returns `{ created, ids }`, because Skylight makes one chore per assigned profile. |
 | `skylight_bulk_create_chores` | Creates up to 50 chores in one call. Validates all items first and supports `dryRun: true`. |
