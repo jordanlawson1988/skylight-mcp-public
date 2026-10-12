@@ -9,6 +9,8 @@ export interface Chore {
   seriesId: string;
   /** Occurrence date of a recurring chore: the date in a composite id, else attributes.start. Null for one-time chores. */
   instanceDate: string | null;
+  /** "HH:mm" of a routine-step occurrence: the time in a time-suffixed id, else attributes.start_time for routine steps. Null otherwise. */
+  instanceTime: string | null;
 }
 export interface RewardPoints { profileId: string; points: number; lifetimePoints: number | null }
 export interface Reward {
@@ -66,7 +68,7 @@ export function mapChore(resource: unknown): Chore | null {
   const rule = Array.isArray(rs) ? str(rs[0]) : str(rs);
   const recurring = bool(a.recurring) ?? rule !== null;
   let ref: ChoreRef;
-  try { ref = parseChoreId(id, "id"); } catch { ref = { seriesId: id, instanceDate: null }; }
+  try { ref = parseChoreId(id, "id"); } catch { ref = { seriesId: id, instanceDate: null, instanceTime: null }; }
   return {
     id, summary,
     start: str(a.start), startTime: str(a.start_time), status: str(a.status),
@@ -77,6 +79,7 @@ export function mapChore(resource: unknown): Chore | null {
     profileIds: relationshipIds(r),
     seriesId: idOf(a.series) ?? ref.seriesId,
     instanceDate: ref.instanceDate ?? (recurring ? str(a.start) : null),
+    instanceTime: ref.instanceTime ?? (bool(a.routine) === true ? str(a.start_time) : null),
   };
 }
 

@@ -54,10 +54,10 @@ test("localDateString uses local calendar fields, zero-padded", () => {
 });
 
 test("parseChoreId splits composite ids and passes plain ids through", () => {
-  assert.deepEqual(parseChoreId("111881467", "choreId"), { seriesId: "111881467", instanceDate: null });
-  assert.deepEqual(parseChoreId(111881467, "choreId"), { seriesId: "111881467", instanceDate: null });
-  assert.deepEqual(parseChoreId("111881467-2026-10-13", "choreId"), { seriesId: "111881467", instanceDate: "2026-10-13" });
-  assert.deepEqual(parseChoreId("abc_1", "choreId"), { seriesId: "abc_1", instanceDate: null });
+  assert.deepEqual(parseChoreId("111881467", "choreId"), { seriesId: "111881467", instanceDate: null, instanceTime: null });
+  assert.deepEqual(parseChoreId(111881467, "choreId"), { seriesId: "111881467", instanceDate: null, instanceTime: null });
+  assert.deepEqual(parseChoreId("111881467-2026-10-13", "choreId"), { seriesId: "111881467", instanceDate: "2026-10-13", instanceTime: null });
+  assert.deepEqual(parseChoreId("abc_1", "choreId"), { seriesId: "abc_1", instanceDate: null, instanceTime: null });
   assert.ok(COMPOSITE_CHORE_ID.test("1-2026-10-13"));
 });
 
@@ -66,4 +66,16 @@ test("parseChoreId rejects invalid ids and impossible composite dates", () => {
     assert.throws(() => parseChoreId(bad, "choreId"), (e: unknown) => e instanceof ValidationError && (e as ValidationError).field === "choreId");
   }
   assert.throws(() => parseChoreId("5-2026-02-30", "choreId"), (e: unknown) => e instanceof ValidationError && (e as ValidationError).field === "choreId");
+});
+
+test("parseChoreId reads the HHMM suffix of routine occurrence ids", () => {
+  assert.deepEqual(parseChoreId("60913118-2026-10-12-0600", "choreId"), { seriesId: "60913118", instanceDate: "2026-10-12", instanceTime: "06:00" });
+  assert.deepEqual(parseChoreId("5-2026-10-12-2000", "choreId"), { seriesId: "5", instanceDate: "2026-10-12", instanceTime: "20:00" });
+  assert.ok(COMPOSITE_CHORE_ID.test("5-2026-10-12-1400"));
+});
+
+test("parseChoreId rejects impossible times and leaves malformed suffixes as plain ids", () => {
+  assert.throws(() => parseChoreId("5-2026-10-12-2500", "choreId"), (e: unknown) => e instanceof ValidationError && e.field === "choreId");
+  assert.throws(() => parseChoreId("5-2026-10-12-0660", "choreId"), ValidationError);
+  assert.deepEqual(parseChoreId("5-2026-10-12-06", "choreId"), { seriesId: "5-2026-10-12-06", instanceDate: null, instanceTime: null });
 });

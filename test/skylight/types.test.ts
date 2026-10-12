@@ -34,7 +34,7 @@ test("mapChores flattens attributes and category relationships", () => {
     relationships: { categories: { data: [{ id: "12" }, { id: "13" }] } },
   }] });
   assert.equal(out.length, 2);
-  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"], seriesId: "900", instanceDate: "2026-10-13" });
+  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"], seriesId: "900", instanceDate: "2026-10-13", instanceTime: null });
   assert.deepEqual(out[1]!.profileIds, ["12", "13"]);
   assert.equal(out[1]!.recurrenceRule, "RRULE:FREQ=WEEKLY");
   assert.equal(out[1]!.routine, false);
@@ -61,6 +61,27 @@ test("mapChores derives seriesId and instanceDate from composite ids and the ser
     ["444", "444", null],
     ["445", "445", "2026-10-12"],
   ]);
+});
+
+test("mapChores maps time-suffixed routine occurrence ids from the live fixture", () => {
+  const out = mapChores(fixture("chores"));
+  assert.equal(out.length, 3);
+  const routine = out[0]!;
+  assert.equal(routine.id, "60913118-2026-10-12-0600");
+  assert.equal(routine.seriesId, "60913118");
+  assert.equal(routine.instanceDate, "2026-10-12");
+  assert.equal(routine.instanceTime, "06:00");
+  assert.equal(routine.routine, true);
+  assert.equal(out[1]!.instanceTime, null);
+  assert.equal(out[1]!.instanceDate, "2026-05-19");
+});
+
+test("instanceTime falls back to start_time for routine steps only", () => {
+  const out = mapChores({ data: [
+    { id: "7", attributes: { summary: "R", routine: true, start_time: "14:00", recurring: true, start: "2026-10-12" } },
+    { id: "8", attributes: { summary: "N", routine: false, start_time: "14:00" } },
+  ] });
+  assert.deepEqual(out.map((c) => c.instanceTime), ["14:00", null]);
 });
 
 test("mappers tolerate missing data and skip malformed items", () => {

@@ -434,3 +434,59 @@ test("delete with a malformed instanceDate is a validation error before any requ
   assert.ok(!t.calls.some((c) => c.method === "DELETE" || c.url.pathname.endsWith("/chores")));
   await t.close();
 });
+
+const ROUTINE_ID = "60913118-2026-10-12-0600";
+
+test("complete chore with a time-suffixed id sends instance_date and instance_time and a numeric path", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/60913118/completions", json: { data: chore("60913118", "Brush teeth") } }]);
+  const r = await t.callTool("skylight_complete_chore", { choreId: ROUTINE_ID });
+  assert.equal(r.isError, false);
+  assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/60913118/completions");
+  assert.deepEqual(t.calls.at(-1)!.body, { status: "complete", instance_date: "2026-10-12", instance_time: "06:00" });
+  const same = await t.callTool("skylight_complete_chore", { choreId: ROUTINE_ID, instanceTime: "06:00" });
+  assert.equal(same.isError, false);
+  const undo = await t.callTool("skylight_complete_chore", { choreId: ROUTINE_ID, done: false });
+  assert.deepEqual(t.calls.at(-1)!.body, { status: "pending", instance_date: "2026-10-12", instance_time: "06:00" });
+  assert.equal(undo.isError, false);
+  await t.close();
+});
+
+test("complete chore rejects an instanceTime that disagrees with the id, before any request", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const r = await t.callTool("skylight_complete_chore", { choreId: ROUTINE_ID, instanceTime: "14:00" });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /instanceTime: does not match the time in choreId/);
+  assert.ok(!t.calls.some((c) => c.method === "PUT"));
+  await t.close();
+});
+
+test("delete one/future on a time-suffixed id uses the date-only composite path", async () => {
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/60913118-2026-10-12", status: 204, text: "" }]);
+  for (const applyTo of ["one", "future"]) {
+    const r = await t.callTool("skylight_delete_chore", { choreId: ROUTINE_ID, applyTo, confirm: true });
+    assert.equal(r.isError, false);
+    assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/60913118-2026-10-12");
+    assert.equal(t.calls.at(-1)!.url.searchParams.get("apply_to"), applyTo);
+  }
+  const all = await t.callTool("skylight_delete_chore", { choreId: ROUTINE_ID, applyTo: "all", confirm: true });
+  assert.equal(all.isError, true); // no mock for the series path
+  assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/60913118");
+  await t.close();
+});
+
+test("update chore with a time-suffixed id puts to the series id", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/60913118", json: { data: chore("60913118", "New") } }]);
+  const r = await t.callTool("skylight_update_chore", { choreId: ROUTINE_ID, summary: "New" });
+  assert.equal(r.isError, false);
+  assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/60913118");
+  await t.close();
+});
+
+test("tool descriptions explain series-date-HHMM ids", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const tools = (await t.client.listTools()).tools;
+  for (const name of ["skylight_list_chores", "skylight_complete_chore", "skylight_delete_chore"]) {
+    assert.match(tools.find((x) => x.name === name)!.description ?? "", /HHMM|-0600/, name);
+  }
+  await t.close();
+});

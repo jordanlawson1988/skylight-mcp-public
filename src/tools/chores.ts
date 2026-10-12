@@ -86,6 +86,15 @@ function resolveInstanceDate(refDate: string | null, instanceDate: string | unde
   return refDate ?? explicit;
 }
 
+/** Resolve the occurrence time from a time-suffixed choreId and/or an explicit instanceTime. */
+function resolveInstanceTime(refTime: string | null, instanceTime: string | undefined): string | null {
+  const explicit = instanceTime === undefined ? null : assertTime(instanceTime, "instanceTime");
+  if (refTime !== null && explicit !== null && refTime !== explicit) {
+    throw new ValidationError("instanceTime", "does not match the time in choreId");
+  }
+  return refTime ?? explicit;
+}
+
 /** Turn Skylight's two instance_date 422s into actionable validation errors; anything else passes through. */
 function mapCompletionError(e: unknown): unknown {
   if (e instanceof SkylightApiError && e.status === 422 && e.message.includes("instance_date")) {
@@ -107,7 +116,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_list_chores",
     {
       title: "List chores",
-      description: "List chores and routine steps in a date range (default: today through 14 days ahead). Returns ids needed for update, complete and delete. Recurring occurrences carry a seriesId and an instanceDate (instanceDate is set only for recurring occurrences, null for one-time chores): pass the chore's id (or seriesId plus instanceDate) to complete and delete.",
+      description: "List chores and routine steps in a date range (default: today through 14 days ahead). Returns ids needed for update, complete and delete. Recurring occurrences carry a seriesId, an instanceDate (set only for recurring occurrences, null for one-time chores) and, for routine steps, an instanceTime. Ids may be a plain series id, `series-date` or `series-date-HHMM` (routine steps, e.g. 60913118-2026-10-12-0600): passing the id exactly as returned by this list is enough for complete, update and delete.",
       inputSchema: {
         after: z.string().optional().describe("Start date YYYY-MM-DD (inclusive). Default today."),
         before: z.string().optional().describe("End date YYYY-MM-DD (inclusive). Default 14 days from today."),
@@ -199,7 +208,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       title: "Update a chore",
       description: "Change fields on an existing chore or routine step. Only the provided fields change. An update always changes the whole series: the date part of a composite choreId is ignored.",
       inputSchema: {
-        choreId: z.string().describe("Chore id from skylight_list_chores (plain or series-date form)."),
+        choreId: z.string().describe("Chore id exactly as returned by skylight_list_chores: plain, series-date or series-date-HHMM."),
         summary: choreInputShape.summary.optional(),
         start: choreInputShape.start.optional(),
         profileIds: choreInputShape.profileIds.optional().describe("Replace the assigned profiles."),
@@ -228,9 +237,9 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_delete_chore",
     {
       title: "Delete a chore",
-      description: "Delete a chore or routine step. One-time chore: omit applyTo. Recurring chore: applyTo \"all\" deletes every occurrence, \"future\" deletes the given occurrence and all later ones, \"one\" deletes only the given occurrence. \"one\" and \"future\" need the occurrence date: pass a composite choreId such as \"123-2026-10-13\" or the plain id plus instanceDate (both come from skylight_list_chores). Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
+      description: "Delete a chore or routine step. One-time chore: omit applyTo. Recurring chore: applyTo \"all\" deletes every occurrence, \"future\" deletes the given occurrence and all later ones, \"one\" deletes only the given occurrence. \"one\" and \"future\" need the occurrence date: pass a composite choreId such as \"123-2026-10-13\" (or \"123-2026-10-13-0600\" for a routine step, exactly as listed) or the plain id plus instanceDate (both come from skylight_list_chores). Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
       inputSchema: {
-        choreId: z.string().describe("Chore id from skylight_list_chores (plain or series-date form)."),
+        choreId: z.string().describe("Chore id exactly as returned by skylight_list_chores: plain, series-date or series-date-HHMM."),
         instanceDate: z.string().optional().describe("YYYY-MM-DD occurrence to anchor applyTo \"one\" or \"future\" on, if choreId is the plain series id."),
         confirm: z.boolean().optional().describe("Must be true to actually delete. Ask the user first."),
         applyTo: deleteApplyToSchema,
@@ -264,13 +273,13 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_complete_chore",
     {
       title: "Mark a chore done or not done",
-      description: "Mark a chore complete (done: true, the default) or revert it (done: false). Recurring chores need the occurrence date (the chore's instanceDate from skylight_list_chores, or a composite choreId); one-time chores must omit it.",
+      description: "Mark a chore complete (done: true, the default) or revert it (done: false). Recurring chores need the occurrence date (the chore's instanceDate from skylight_list_chores, or a composite choreId); one-time chores must omit it. Routine-step ids look like series-date-HHMM: pass the id as returned by the list and the time is sent for you.",
       inputSchema: {
-        choreId: z.string().describe("Chore id from skylight_list_chores (plain or series-date form)."),
+        choreId: z.string().describe("Chore id exactly as returned by skylight_list_chores: plain, series-date or series-date-HHMM."),
         instanceDate: z.string().optional().describe("YYYY-MM-DD. Required for recurring chores (use the chore's instanceDate from skylight_list_chores). Omit for one-time chores."),
         profileId: z.string().optional().describe("Only for up-for-grabs chores: which profile completed it. Omit for chores assigned to a profile."),
         done: z.boolean().optional().describe("Default true."),
-        instanceTime: z.string().optional().describe("HH:mm, only for timed instances."),
+        instanceTime: z.string().optional().describe("HH:mm, only for timed instances (routine steps). Sent automatically when choreId ends in -HHMM; an explicit value must match."),
       },
       annotations: ANNOTATIONS.update,
     },
@@ -278,7 +287,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const ref = parseChoreId(args.choreId, "choreId");
       const instanceDate = resolveInstanceDate(ref.instanceDate, args.instanceDate);
       const profileId = args.profileId === undefined ? null : assertId(args.profileId, "profileId");
-      const instanceTime = args.instanceTime === undefined ? null : assertTime(args.instanceTime, "instanceTime");
+      const instanceTime = resolveInstanceTime(ref.instanceTime, args.instanceTime);
       const status = args.done === false ? CHORE_STATUS.notDone : CHORE_STATUS.done;
       const frameId = await ctx.frames.resolve();
       const body: Record<string, unknown> = {
