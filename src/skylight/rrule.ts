@@ -1,5 +1,6 @@
 import { ValidationError } from "./errors.js";
 import { assertDate } from "./ids.js";
+import { slotFromHour, type RoutineHour } from "./vocab.js";
 
 export const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 export type Weekday = (typeof WEEKDAYS)[number];
@@ -12,6 +13,8 @@ export interface Recurrence {
   weekdays?: Weekday[];
   monthDay?: number;
   until?: string;
+  /** Internal: BYHOUR for routine steps (6, 14 or 20). Set from timeOfDay by the payload builders, not exposed by the tools. */
+  hour?: RoutineHour;
 }
 
 export function buildRrule(r: Recurrence): string {
@@ -33,9 +36,19 @@ export function buildRrule(r: Recurrence): string {
     if (!Number.isInteger(r.monthDay) || r.monthDay < 1 || r.monthDay > 31) throw new ValidationError("recurrence.monthDay", "must be 1-31");
     parts.push(`BYMONTHDAY=${r.monthDay}`);
   }
+  if (r.hour !== undefined) {
+    if (slotFromHour(r.hour) === null) throw new ValidationError("recurrence.hour", "must be a routine hour (6, 14 or 20)");
+    parts.push(`BYHOUR=${r.hour}`);
+  }
   if (r.until !== undefined) {
     assertDate(r.until, "recurrence.until");
     parts.push(`UNTIL=${r.until.replaceAll("-", "")}`);
   }
   return `RRULE:${parts.join(";")}`;
+}
+
+/** The BYHOUR of an RRULE string, or null. */
+export function hourFromRrule(rule: string | null): number | null {
+  const m = rule === null ? null : /(?:^|[:;])BYHOUR=(\d{1,2})(?=;|$)/.exec(rule);
+  return m ? Number(m[1]) : null;
 }

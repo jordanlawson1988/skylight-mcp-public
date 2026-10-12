@@ -11,16 +11,21 @@ export function assertId(value: string | number, field: string): string {
   return s;
 }
 
-export const COMPOSITE_CHORE_ID = /^(\d+)-(\d{4}-\d{2}-\d{2})$/;
+/** `<series>-<YYYY-MM-DD>` with an optional `-HHMM` suffix (routine-step occurrences, e.g. `60913118-2026-10-12-0600`). */
+export const COMPOSITE_CHORE_ID = /^(\d+)-(\d{4}-\d{2}-\d{2})(?:-(\d{2})(\d{2}))?$/;
 
-export interface ChoreRef { seriesId: string; instanceDate: string | null }
+export interface ChoreRef { seriesId: string; instanceDate: string | null; /** "HH:mm" from a time-suffixed id, else null. */ instanceTime: string | null }
 
-/** Accepts "123" or "123-2026-10-13". Throws ValidationError(field) otherwise. */
+/** Accepts "123", "123-2026-10-13" or "123-2026-10-13-0600". Throws ValidationError(field) otherwise. */
 export function parseChoreId(value: unknown, field: string): ChoreRef {
   const id = assertId(value as string | number, field);
   const m = COMPOSITE_CHORE_ID.exec(id);
-  if (!m) return { seriesId: id, instanceDate: null };
-  return { seriesId: m[1]!, instanceDate: assertDate(m[2]!, field) };
+  if (!m) return { seriesId: id, instanceDate: null, instanceTime: null };
+  return {
+    seriesId: m[1]!,
+    instanceDate: assertDate(m[2]!, field),
+    instanceTime: m[3] === undefined ? null : assertTime(`${m[3]}:${m[4]}`, field),
+  };
 }
 
 export function localDateString(d: Date = new Date()): string {
@@ -65,4 +70,10 @@ export function assertPoints(value: number, field: string): number {
     throw new ValidationError(field, "must be an integer from -10000 to 10000");
   }
   return value;
+}
+
+/** "#RRGGBB" hex color, normalised to upper case. */
+export function assertHexColor(value: string, field: string): string {
+  if (typeof value !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value)) throw new ValidationError(field, "must be a hex color like #CB434C");
+  return value.toUpperCase();
 }

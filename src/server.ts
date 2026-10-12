@@ -11,7 +11,7 @@ import { VERSION } from "./version.js";
 export function createServer(ctx: ToolContext): McpServer {
   const server = new McpServer(
     { name: "skylight-mcp", version: VERSION },
-    { instructions: "Unofficial Skylight Calendar tools. Destructive tools require confirm: true; always show the user what will be deleted and get their agreement first." }
+    { instructions: "Unofficial Skylight Calendar tools for chores, rewards and profiles. Destructive tools (delete chore, delete profile) require confirm: true; always show the user what will be deleted and get their agreement first. To retire a person without losing their events, prefer skylight_update_profile with kind \"label\" over deleting the profile." }
   );
   registerAllTools(server, ctx);
   return server;

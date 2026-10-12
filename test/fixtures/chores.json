@@ -1,0 +1,200 @@
+{
+  "data": [
+    {
+      "id": "60913118-2026-10-12-0600",
+      "type": "chore",
+      "attributes": {
+        "id": "60913118-2026-10-12-0600",
+        "group": "60913118",
+        "series": "60913118",
+        "summary": "Chore 1",
+        "description": null,
+        "status": "pending",
+        "start": "2026-10-12",
+        "recurring_until": null,
+        "recurrence_set": [
+          "RRULE:FREQ=WEEKLY;INTERVAL=1;WKST=SU;BYHOUR=6;BYDAY=MO,TU,WE,TH,FR"
+        ],
+        "completed_on": null,
+        "completed_at": null,
+        "reward_points": null,
+        "emoji_icon": null,
+        "routine": true,
+        "position": 5,
+        "timer_seconds": null,
+        "renewal_unit": null,
+        "renewal_interval": null,
+        "origin": "user",
+        "start_time": "06:00",
+        "up_for_grabs": false,
+        "recurring": true
+      },
+      "relationships": {
+        "category": {
+          "data": {
+            "id": "15057970",
+            "type": "category"
+          }
+        },
+        "completed_category": {
+          "data": null
+        },
+        "linked_task_group": {
+          "data": null
+        },
+        "habit_tracker": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "65827263-2026-05-19",
+      "type": "chore",
+      "attributes": {
+        "id": "65827263-2026-05-19",
+        "group": "65827263",
+        "series": "65827263",
+        "summary": "Chore 2",
+        "description": null,
+        "status": "pending",
+        "start": "2026-05-19",
+        "recurring_until": "2026-05-21",
+        "recurrence_set": [
+          "RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=TU,FR;WKST=SU;UNTIL=20260521"
+        ],
+        "completed_on": null,
+        "completed_at": null,
+        "reward_points": null,
+        "emoji_icon": null,
+        "routine": false,
+        "position": 9,
+        "timer_seconds": null,
+        "renewal_unit": null,
+        "renewal_interval": null,
+        "origin": "user",
+        "start_time": null,
+        "up_for_grabs": false,
+        "recurring": true
+      },
+      "relationships": {
+        "category": {
+          "data": {
+            "id": "15057870",
+            "type": "category"
+          }
+        },
+        "completed_category": {
+          "data": null
+        },
+        "linked_task_group": {
+          "data": null
+        },
+        "habit_tracker": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "93308731",
+      "type": "chore",
+      "attributes": {
+        "id": 93308731,
+        "group": "93308731",
+        "series": "93308731",
+        "summary": "Chore 3",
+        "description": "Details",
+        "status": "complete",
+        "start": null,
+        "recurring_until": null,
+        "recurrence_set": null,
+        "completed_on": "2026-08-27",
+        "completed_at": "2026-08-27T16:00:00.000Z",
+        "reward_points": 1,
+        "emoji_icon": null,
+        "routine": false,
+        "position": 15,
+        "timer_seconds": null,
+        "renewal_unit": null,
+        "renewal_interval": null,
+        "origin": "user",
+        "start_time": null,
+        "up_for_grabs": true,
+        "recurring": false
+      },
+      "relationships": {
+        "category": {
+          "data": null
+        },
+        "completed_category": {
+          "data": {
+            "id": "15057970",
+            "type": "category"
+          }
+        },
+        "linked_task_group": {
+          "data": null
+        },
+        "habit_tracker": {
+          "data": null
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "id": "15057870",
+      "type": "category",
+      "attributes": {
+        "id": 15057870,
+        "color": "#2178AF",
+        "label": "Kid A",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true
+      }
+    },
+    {
+      "id": "15057970",
+      "type": "category",
+      "attributes": {
+        "id": 15057970,
+        "color": "#fc86bc",
+        "label": "Kid C",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true
+      }
+    },
+    {
+      "id": "15057920",
+      "type": "category",
+      "attributes": {
+        "id": 15057920,
+        "color": "#93D1E6",
+        "label": "Kid B",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true
+      }
+    },
+    {
+      "id": "14515614",
+      "type": "category",
+      "attributes": {
+        "id": 14515614,
+        "color": "#CB434C",
+        "label": "Parent A",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true
+      }
+    },
+    {
+      "id": "14515613",
+      "type": "category",
+      "attributes": {
+        "id": 14515613,
+        "color": "#d5b6ec",
+        "label": "Parent B",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true
+      }
+    }
+  ]
+}

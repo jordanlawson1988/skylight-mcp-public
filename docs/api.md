@@ -17,7 +17,19 @@ Nothing is guaranteed by Skylight.
 - `GET /api/frames/calendar` → `{ data: [{ id, attributes: { name?, household_name? } }] }`
 - Profiles are categories: `GET /api/frames/{frameId}/categories`.
   Attribute names used by the web app: `label` (display name), `color`, `emoji`,
-  `selected_for_chore_chart`. No adult/child flag was found in the bundle; `isAdult` stays null.
+  `selected_for_chore_chart`, `linked_to_profile`, `profile_picture_urls`. Verified live 2026-10-12: there is no adult/child flag at all, so the tool exposes `kind` ("profile" when `linked_to_profile` is true, "label" otherwise) and `onChoreChart` instead.
+
+## Profiles (categories)
+
+Source tags: [bundle] read from the Skylight web app bundle, [live] observed on a real frame. Unmarked write behavior is unverified until the live smoke has run.
+
+- List: `GET /api/frames/{f}/categories` → `{ data: [{ id, type: "category", attributes: { id, label, color, selected_for_chore_chart, linked_to_profile, profile_picture_urls } }] }` [live]. No emoji, birthday or adult field on categories [live]. A person ("profile") has `linked_to_profile: true`; a calendar "label" (e.g. Birthdays) has `linked_to_profile: false` [live].
+- Get one: `GET /api/frames/{f}/categories/{id}` exists [bundle].
+- Create: `POST /api/frames/{f}/categories` body `{ label, color, linked_to_profile, selected_for_chore_chart }`; the web app always sets `selected_for_chore_chart` equal to `linked_to_profile` [bundle]. Optional query `link_own_profile=true` links the category to the signed-in user; the MCP does not expose it [bundle].
+- Update: `PUT /api/frames/{f}/categories/{id}` with any of `{ label, color, linked_to_profile, selected_for_chore_chart }`; when `linked_to_profile` is sent, the web app sends `selected_for_chore_chart` with the same value. "Convert to label" in the app is `linked_to_profile: false` [bundle].
+- Delete: `DELETE /api/frames/{f}/categories/{id}` with optional query `reassign_to_category_id=<other id>`, which moves the deleted category's chores and events to that category [bundle]. The app's UI only offers delete for labels and "Convert to Label" for profiles; the API itself deletes a person profile directly, no convert-to-label needed [live 2026-10-12]. Deleting a profile without `reassign_to_category_id` deletes its chores with it [live 2026-10-12]; with `reassign_to_category_id`, its chores move to the target profile (a chore reappeared assigned to the target) [live 2026-10-12].
+- Color is a hex string like `#CB434C` [live].
+- MCP mapping: `kind` is "profile" or "label" (`PROFILE_KINDS` in `src/skylight/vocab.ts`); `skylight_delete_profile` previews without `confirm: true`.
 
 ## Chores and routines
 
@@ -43,7 +55,8 @@ Nothing is guaranteed by Skylight.
 
 ## Rewards
 
-- `GET /api/frames/{frameId}/rewards`, `GET /api/frames/{frameId}/reward_points`
+- `GET /api/frames/{frameId}/rewards` returns `{ data: [{ id, type: "reward", attributes: { name, emoji_icon, description, point_value, respawn_on_redemption, redeemed_at, origin }, relationships? }] }`. The cost is `point_value`.
+- `GET /api/frames/{frameId}/reward_points` returns a PLAIN ARRAY, not JSON:API: `[{ category_id: number, lifetime_points_earned: number, current_point_balance: number }, ...]`, one entry per category. Labels such as Birthdays are included.
 - `POST /api/frames/{frameId}/reward_points` with `{ category_ids, points }` (negative subtracts).
 
 ## Verified chore semantics
@@ -51,7 +64,8 @@ Nothing is guaranteed by Skylight.
 Verified live on 2026-10-12 against app.ourskylight.com.
 
 1. `POST /api/frames/{f}/chores/create_multiple` returns `{ data: [chore...] }`. Our `buildChoreCreateBody` works as-is, including `recurrence_set: ["RRULE:FREQ=DAILY"]` which comes back `recurring: true`.
-2. Chore ids in list responses: the series' first occurrence has the plain numeric id (`"111881467"`); later occurrences of a recurring chore have composite ids `"111881467-2026-10-13"` (`<seriesId>-<YYYY-MM-DD>`). `attributes.series` always holds the numeric series id. `attributes.start` is the series start date.
+2. Chore ids in list responses: the series' first occurrence has the plain numeric id (`"111881467"`); later occurrences of a recurring chore have composite ids `"111881467-2026-10-13"` (`<seriesId>-<YYYY-MM-DD>`). `attributes.series` always holds the numeric series id. `attributes.start` on a list row is the date of that OCCURRENCE (not the series start date).
+   - Routine-step occurrences carry a time suffix: `<series>-<YYYY-MM-DD>-<HHMM>`, e.g. `60913118-2026-10-12-0600`. `attributes.start_time` is `"06:00"`, `"14:00"` or `"20:00"` and the rule carries `BYHOUR=6|14|20`. The completions path still takes the numeric series id, with `instance_date` and `instance_time` in the body.
 3. `PUT /chores/{id}/completions`:
    - `{id}` MUST be the numeric series id. A composite id gives 422 `{"errors":{"id":["is not a number"]}}`.
    - Recurring chore: body `{ status, instance_date }` works. Omitting `instance_date` gives 422 `instance_date can't be blank`.
@@ -64,7 +78,15 @@ Verified live on 2026-10-12 against app.ourskylight.com.
    - Recurring, path numeric series id + `?apply_to=all` deletes the whole series. Series id with no `apply_to` gives 400 `you must have a valid value for apply_to`.
    - Recurring, path composite id `<series>-<date>` + `?apply_to=one` deletes only that occurrence (verified).
    - Recurring, path composite id + `?apply_to=future` deletes that occurrence and all later ones (verified).
+   - Routines are all-or-nothing: `DELETE /chores/<series>-<date>?apply_to=one` (and `future`) on a routine step returns 400 `{"message":"you may not edit a single instance of a routine"}`. Routine steps can only be deleted with `apply_to=all`; `one`/`future` apply to regular recurring chores only. The tool rejects `one`/`future` for time-suffixed ids before any request.
 6. `GET /chores/{id}` returns 404 (no single-chore endpoint). The list is `GET /chores?after=&before=&include_late=true&include_up_for_grabs=true&filter=linked_to_profile`.
+7. Chore attributes also include `description`, `timer_seconds`, `position`, `completed_at`, `completed_on` and `up_for_grabs`.
+8. Routines (`routine: true`) on create:
+   - `start_time` MUST be blank (422 `start_time must be blank`).
+   - `recurrence_set` MUST be present (422 `cannot be empty for routines`) and MUST contain exactly one `BYHOUR` of 6, 14 or 20 (422 otherwise, including `BYHOUR=7`). The server derives each occurrence's `start_time` from it.
+   - Non-routine chores MUST NOT have `BYHOUR` (422 `BYHOUR not allowed for non-routine chores`).
+   - The tools expose this as `timeOfDay` (`morning` = 6, `afternoon` = 14, `evening` = 20; `ROUTINE_SLOTS` in `vocab.ts`).
+9. Up-for-grabs chores: `category_ids: []` and `start: null` are both accepted. `relationships.category.data` is null; a claimed or finished one has `relationships.completed_category.data.id`. The list returns them only when `include_up_for_grabs=true`, with or without `filter=linked_to_profile`.
 
 ## Login verification
 
