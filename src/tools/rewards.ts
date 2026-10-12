@@ -41,7 +41,7 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
       description: "Adjust reward points for one or more profiles. Negative points subtract. Not idempotent: repeating the call adds the points again. Confirm the amount with the user before subtracting. Returns { added: { profileIds, points }, balances } where balances are re-read after the change as [{ profileId, name, kind, points, lifetimePoints }]. If the re-read fails, balances is null and a warning says the points were still added: do not retry the add, call skylight_get_reward_points instead. Profile ids come from skylight_list_profiles; labels such as Birthdays are rejected.",
       inputSchema: {
         profileIds: z.array(z.string()).min(1).max(20).describe("Profile ids from skylight_list_profiles."),
-        points: z.number().int().describe("Points to add (negative subtracts). Range -10000 to 10000."),
+        points: z.number().int().min(-10000).max(10000).describe("Points to add (negative subtracts). Range -10000 to 10000."),
       },
       annotations: ANNOTATIONS.mutate,
     },

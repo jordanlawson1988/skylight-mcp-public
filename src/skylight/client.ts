@@ -16,8 +16,20 @@ export interface SkylightClient {
   request<T = unknown>(opts: RequestOptions): Promise<T>;
 }
 
-export function createClient(opts: { fetch: typeof globalThis.fetch; config: SkylightConfig; tokens: TokenProvider }): SkylightClient {
+export type Sleep = (ms: number) => Promise<void>;
+const defaultSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Reads wait before the single retry: Retry-After seconds capped at 2s, else 500ms. */
+const RETRY_DEFAULT_MS = 500;
+const RETRY_CAP_SECONDS = 2;
+function retryDelayMs(res: Response): number {
+  const raw = res.headers.get("retry-after")?.trim();
+  return raw !== undefined && /^\d+(\.\d+)?$/.test(raw) ? Math.min(Number(raw), RETRY_CAP_SECONDS) * 1000 : RETRY_DEFAULT_MS;
+}
+
+export function createClient(opts: { fetch: typeof globalThis.fetch; config: SkylightConfig; tokens: TokenProvider; sleep?: Sleep }): SkylightClient {
   const { config } = opts;
+  const sleep = opts.sleep ?? defaultSleep;
 
   async function send(url: string, init: RequestInit, token: string): Promise<{ res: Response; text: string }> {
     const controller = new AbortController();
@@ -56,6 +68,11 @@ export function createClient(opts: { fetch: typeof globalThis.fetch; config: Sky
         secrets.push(token);
         ({ res, text } = await send(url.toString(), init, token));
         if (res.status === 401) throw new AuthError("Skylight rejected the credentials after a refresh. Run `skylight-mcp login` again.");
+      }
+      // Reads are safe to repeat: retry once on rate limiting or a server error. Writes are never retried (they could duplicate).
+      if (o.method === "GET" && (res.status === 429 || res.status >= 500)) {
+        await sleep(retryDelayMs(res));
+        ({ res, text } = await send(url.toString(), init, token));
       }
       if (!res.ok) {
         const retryAfter = res.headers.get("retry-after");

@@ -29,7 +29,7 @@ export const choreInputShape = {
   routine: z.boolean().optional().describe("true makes this a routine step instead of a chore (needs timeOfDay, no startTime; recurrence defaults to daily). Default false."),
   timeOfDay: z.enum(ROUTINE_SLOT_NAMES).optional().describe("Routine steps only: which routine the step belongs to. Required when routine is true."),
   upForGrabs: z.boolean().optional().describe("true lets any profile claim it; start and profileIds then become optional. Default false."),
-  rewardPoints: z.number().int().optional().describe("Points earned on completion."),
+  rewardPoints: z.number().int().min(-10000).max(10000).optional().describe("Points earned on completion (-10000 to 10000)."),
   emoji: z.string().optional().describe("Single emoji icon."),
   description: z.string().optional().describe("Longer details shown on the chore, up to 500 characters."),
   timerSeconds: z.number().int().min(0).max(86400).optional().describe("Countdown timer length in seconds (0-86400)."),
@@ -173,7 +173,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_bulk_create_chores",
     {
       title: "Bulk create chores and routines",
-      description: `Create up to ${MAX_BULK} chores or routine steps in one call. Every item is validated before any request; invalid items are reported without stopping the rest. Use dryRun: true first to show the user exactly what will be created.`,
+      description: `Create up to ${MAX_BULK} chores or routine steps in one call. Every item is validated before any request; invalid items are reported without stopping the rest. Use dryRun: true first to show the user exactly what will be created. If some items fail, fix and resend ONLY the failed items; resending the whole batch creates duplicates.`,
       inputSchema: {
         chores: z.array(z.object(choreInputShape)).min(1).max(MAX_BULK),
         dryRun: z.boolean().optional().describe("true validates and returns the payloads without creating anything."),

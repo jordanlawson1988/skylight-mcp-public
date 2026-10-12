@@ -704,3 +704,23 @@ test("update chore guards profileIds when given, and skips the lookup otherwise"
   assert.equal(categoryGets(t), before);
   await t.close();
 });
+
+test("points and timer schemas advertise their bounds", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const tools = (await t.client.listTools()).tools;
+  const props = (name: string) => tools.find((x) => x.name === name)!.inputSchema.properties as Record<string, { minimum?: number; maximum?: number; anyOf?: Array<{ minimum?: number; maximum?: number }> }>;
+  const rp = props("skylight_create_chore").rewardPoints!;
+  assert.deepEqual([rp.minimum, rp.maximum], [-10000, 10000]);
+  const ts = props("skylight_create_chore").timerSeconds!;
+  assert.deepEqual([ts.minimum, ts.maximum], [0, 86400]);
+  const add = props("skylight_add_reward_points").points!;
+  assert.deepEqual([add.minimum, add.maximum], [-10000, 10000]);
+  const upd = props("skylight_update_chore").rewardPoints!;
+  assert.ok(upd.anyOf?.some((a) => a.minimum === -10000 && a.maximum === 10000));
+  const bulk = tools.find((x) => x.name === "skylight_bulk_create_chores")!;
+  assert.match(bulk.description ?? "", /resend ONLY the failed items; resending the whole batch creates duplicates/);
+  const over = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13", profileIds: ["12"], rewardPoints: 10001 }).catch(() => ({ isError: true }));
+  assert.equal(over.isError, true);
+  assert.ok(!t.calls.some((c) => c.method === "POST"));
+  await t.close();
+});

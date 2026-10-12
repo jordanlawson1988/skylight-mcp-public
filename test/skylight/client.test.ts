@@ -77,13 +77,13 @@ test("empty body returns null; path outside /api or /oauth is rejected", async (
 
 test("429 message includes retry-after hint", async () => {
   const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", status: 429, text: "slow down", headers: { "retry-after": "7" } }]);
-  const client = createClient({ fetch, config, tokens: tokens(["AT"]) });
+  const client = createClient({ fetch, config, tokens: tokens(["AT"]), sleep: async () => {} });
   await assert.rejects(client.request({ method: "GET", path: "/api/x" }), /retry after 7/i);
 });
 
 test("a 500 body echoing the bearer token does not leak it into the error message", async () => {
   const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", status: 500, text: "request echo: authorization=Bearer SECRETTOKEN123 and SECRETTOKEN123" }]);
-  const client = createClient({ fetch, config, tokens: tokens(["SECRETTOKEN123"]) });
+  const client = createClient({ fetch, config, tokens: tokens(["SECRETTOKEN123"]), sleep: async () => {} });
   await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => {
     assert.ok(e instanceof SkylightApiError);
     assert.ok(!e.message.includes("SECRETTOKEN123"));
@@ -95,10 +95,59 @@ test("a 500 body echoing the bearer token does not leak it into the error messag
 test("the refreshed token is also redacted after a 401 retry", async () => {
   let n = 0;
   const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", handler: () => (n++ === 0 ? { status: 401, text: "nope" } : { status: 500, text: "echo NEWTOKEN999 OLDTOKEN111" }) }]);
-  const client = createClient({ fetch, config, tokens: tokens(["OLDTOKEN111", "NEWTOKEN999"]) });
+  const client = createClient({ fetch, config, tokens: tokens(["OLDTOKEN111", "NEWTOKEN999"]), sleep: async () => {} });
   await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => {
     assert.ok(e instanceof SkylightApiError);
     assert.ok(!e.message.includes("NEWTOKEN999") && !e.message.includes("OLDTOKEN111"));
     return true;
   });
+});
+
+function retryHarness(responses: Array<{ status: number; json?: unknown; text?: string; retryAfter?: string }>) {
+  let n = 0;
+  const sleeps: number[] = [];
+  const { fetch, calls } = createMockFetch([{ method: "GET", path: "/api/x", handler: () => responses[Math.min(n++, responses.length - 1)]! }, { method: "POST", path: "/api/x", handler: () => responses[Math.min(n++, responses.length - 1)]! }]);
+  // The mock route headers are static, so wrap fetch to inject retry-after per response.
+  const wrapped = (async (input: string | URL, init?: RequestInit) => {
+    const res = await fetch(input, init);
+    const idx = calls.length - 1;
+    const ra = responses[Math.min(idx, responses.length - 1)]?.retryAfter;
+    return ra === undefined ? res : new Response(await res.text(), { status: res.status, headers: { "retry-after": ra } });
+  }) as typeof globalThis.fetch;
+  const client = createClient({ fetch: wrapped, config, tokens: tokens(["AT"]), sleep: async (ms) => { sleeps.push(ms); } });
+  return { client, calls, sleeps };
+}
+
+test("GET retries once on 429 after min(retry-after, 2s)", async () => {
+  const h = retryHarness([{ status: 429, text: "slow", retryAfter: "7" }, { status: 200, json: { ok: true } }]);
+  assert.deepEqual(await h.client.request({ method: "GET", path: "/api/x" }), { ok: true });
+  assert.equal(h.calls.length, 2);
+  assert.deepEqual(h.sleeps, [2000]);
+});
+
+test("GET retries once on 5xx after 500ms, and honours a short retry-after", async () => {
+  const a = retryHarness([{ status: 503, text: "down" }, { status: 200, json: { ok: 1 } }]);
+  assert.deepEqual(await a.client.request({ method: "GET", path: "/api/x" }), { ok: 1 });
+  assert.deepEqual(a.sleeps, [500]);
+  const b = retryHarness([{ status: 429, text: "slow", retryAfter: "1" }, { status: 200, json: { ok: 2 } }]);
+  await b.client.request({ method: "GET", path: "/api/x" });
+  assert.deepEqual(b.sleeps, [1000]);
+});
+
+test("GET gives up after one retry and reports the second failure", async () => {
+  const h = retryHarness([{ status: 500, text: "first" }, { status: 502, text: "second" }, { status: 200, json: {} }]);
+  await assert.rejects(h.client.request({ method: "GET", path: "/api/x" }), (e: unknown) => e instanceof SkylightApiError && e.status === 502);
+  assert.equal(h.calls.length, 2);
+});
+
+test("GET does not retry other errors, and writes are never retried", async () => {
+  const notFound = retryHarness([{ status: 404, text: "nope" }, { status: 200, json: {} }]);
+  await assert.rejects(notFound.client.request({ method: "GET", path: "/api/x" }), (e: unknown) => e instanceof SkylightApiError && e.status === 404);
+  assert.equal(notFound.calls.length, 1);
+  for (const status of [429, 500]) {
+    const post = retryHarness([{ status, text: "fail" }, { status: 200, json: {} }]);
+    await assert.rejects(post.client.request({ method: "POST", path: "/api/x", body: {} }), (e: unknown) => e instanceof SkylightApiError && e.status === status);
+    assert.equal(post.calls.length, 1);
+    assert.deepEqual(post.sleeps, []);
+  }
 });
