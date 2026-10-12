@@ -3,7 +3,7 @@ import { z } from "zod";
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertNumericId } from "../skylight/ids.js";
 import { assertAlbumTitle, assertPhotoIds, buildAlbumMembershipBody, buildCaptionBody, buildDestroyPhotosBody, MAX_ALBUM_TITLE_LENGTH, MAX_CAPTION_LENGTH } from "../skylight/photo-payload.js";
-import { mapAlbum, mapAlbums, mapPhoto, mapPhotoPage, type Album, type Photo } from "../skylight/types.js";
+import { mapAlbum, mapAlbums, mapFrameUsers, mapPhoto, mapPhotoPage, photosCarryOwner, type Album, type Photo } from "../skylight/types.js";
 import { formatOffsetDateTime } from "../skylight/time.js";
 import type { ToolContext } from "./context.js";
 import { ANNOTATIONS, run } from "./result.js";
@@ -59,7 +59,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
     "skylight_list_photos",
     {
       title: "List photos",
-      description: "List the photos and videos on the frame, newest first, one page at a time, as { page, pages, photos: [{ id, type, createdAt, caption, from, commentsCount }] }. type is photo or video; createdAt is in the configured time zone; from is who sent it. Photo ids are needed for captions, albums and deletion. Photo files and links are never returned.",
+      description: "List the photos and videos on the frame, newest first, one page at a time, as { page, pages, photos: [{ id, type, createdAt, caption, from, commentsCount }] }. type is photo or video; createdAt is in the configured time zone; from is \"you\" for photos the frame owner sent and the sender's email for anyone else. Photo ids are needed for captions, albums and deletion. Photo files and links are never returned.",
       inputSchema: { page: z.number().int().min(1).optional().describe("Page number, starting at 1 (default 1). pages in the result is the total.") },
       annotations: ANNOTATIONS.read,
     },
@@ -67,7 +67,14 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const page = args.page ?? 1;
       if (!Number.isInteger(page) || page < 1) throw new ValidationError("page", "must be a whole number from 1");
       const frameId = await ctx.frames.resolve();
-      const result = mapPhotoPage(await ctx.client.request({ method: "GET", path: messagesPath(frameId), query: { page } }), page);
+      const json = await ctx.client.request({ method: "GET", path: messagesPath(frameId), query: { page } });
+      // Messages normally name the frame owner; if one does not, find the owner among the frame's users so their own photos show "you", not their email.
+      let ownerId: string | null = null;
+      if (!photosCarryOwner(json)) {
+        try { ownerId = mapFrameUsers(await ctx.client.request({ method: "GET", path: `/api/frames/${frameId}/users` })).find((u) => u.owner)?.userId ?? null; }
+        catch (e) { if (!(e instanceof SkylightApiError)) throw e; }
+      }
+      const result = mapPhotoPage(json, page, ownerId);
       return { ...result, photos: result.photos.map((p) => present(p, tz)) };
     })
   );

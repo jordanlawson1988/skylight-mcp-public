@@ -26,6 +26,39 @@ test("list photos sends the page and returns the page, page count and photos wit
   await t.close();
 });
 
+const ownerPage = (over: (m: Record<string, unknown>, i: number) => Record<string, unknown>) => ({
+  ...messages, data: (messages.data as unknown as Array<{ attributes: Record<string, unknown> }>).map((m, i) => ({ ...m, attributes: over(m.attributes, i) })),
+});
+
+test("list photos shows \"you\" for photos the frame owner sent and never returns the owner's email", async () => {
+  const page = ownerPage((a, i) => (i === 0 ? { ...a, from_email: "owner@example.invalid", sender_id: 12311021, frame_owner_id: 12311021 } : a));
+  const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/messages`, json: page }]);
+  const r = await t.callTool("skylight_list_photos");
+  assert.deepEqual((r.data as { photos: Array<{ from: string }> }).photos.map((p) => p.from), ["you", "user@example.invalid"]);
+  assert.ok(!r.text.includes("owner@example.invalid"));
+  assert.equal(t.calls.filter((c) => c.url.pathname === `${F}/users`).length, 0, "every message names the owner, so no extra request");
+  await t.close();
+});
+
+test("list photos asks the frame users for the owner when messages do not carry frame_owner_id", async () => {
+  const page = ownerPage((a, i) => { const { frame_owner_id: _gone, ...rest } = a; return i === 0 ? { ...rest, from_email: "owner@example.invalid", sender_id: 12311021 } : rest; });
+  const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/messages`, json: page }, { method: "GET", path: `${F}/users`, json: fixture("frame_users") }]);
+  const r = await t.callTool("skylight_list_photos");
+  assert.deepEqual((r.data as { photos: Array<{ from: string }> }).photos.map((p) => p.from), ["you", "user@example.invalid"]);
+  assert.ok(!r.text.includes("owner@example.invalid"));
+  await t.close();
+});
+
+test("list photos withholds senders (from: null) rather than risk the owner's email when the owner cannot be found", async () => {
+  const page = ownerPage((a) => { const { frame_owner_id: _gone, ...rest } = a; return { ...rest, from_email: "owner@example.invalid", sender_id: 12311021 }; });
+  const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/messages`, json: page }, { method: "GET", path: `${F}/users`, status: 500, text: "boom" }]);
+  const r = await t.callTool("skylight_list_photos");
+  assert.equal(r.isError, false);
+  assert.deepEqual((r.data as { photos: Array<{ from: string | null }> }).photos.map((p) => p.from), [null, null]);
+  assert.ok(!r.text.includes("owner@example.invalid"));
+  await t.close();
+});
+
 test("list photos shows creation times in the configured zone", async () => {
   const t = await connectTestClient([FRAMES, { method: "GET", path: `${F}/messages`, json: messages }], { env: { SKYLIGHT_TIMEZONE: "America/Los_Angeles" } });
   const d = (await t.callTool("skylight_list_photos")).data as { photos: Array<{ createdAt: string }> };

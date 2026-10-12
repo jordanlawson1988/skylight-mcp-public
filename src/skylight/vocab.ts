@@ -61,6 +61,9 @@ export const RRULE_PREFIX = "RRULE:";
 export const ALL_PHOTOS_ALBUM_ID = -1;
 export const ALL_PHOTOS = "all";
 
+// Photos: the sender shown for a photo the frame owner sent (their email is never returned); other senders are shown by email, as Skylight does.
+export const OWN_PHOTO_SENDER = "you";
+
 // Frame sharing (bundle + live 2026-10-12): blocking a user makes their status "rejected"; approving moves it back to "approved".
 export const FRAME_USER_STATUS = { approved: "approved", blocked: "rejected", awaitingApproval: "awaiting_approval" } as const;
 
