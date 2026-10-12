@@ -3,5 +3,7 @@
 export const CHORE_STATUS = { done: "complete", notDone: "pending" } as const;
 // apply_to for recurring chore update/delete: "one" = this instance, "future" = this and following, "all" = whole series.
 export const APPLY_TO_VALUES: readonly string[] = ["one", "future", "all"];
-// Only "all" is exposed in v1: "one" and "future" need an instance anchor (occurrence date) that v1 does not send yet.
-export const EXPOSED_APPLY_TO_VALUES: readonly string[] = ["all"];
+// Delete exposes all three scopes (verified live 2026-10-12: "one"/"future" anchor on a composite `<seriesId>-<date>` path id).
+export const EXPOSED_APPLY_TO_VALUES: readonly string[] = ["one", "future", "all"];
+// Update only exposes "all" (or omitted): anchor semantics for "one"/"future" on PUT are unverified.
+export const EXPOSED_UPDATE_APPLY_TO_VALUES: readonly string[] = ["all"];

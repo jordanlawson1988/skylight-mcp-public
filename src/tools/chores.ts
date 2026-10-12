@@ -2,10 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput } from "../skylight/chore-payload.js";
 import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors.js";
-import { assertDate, assertId, assertTime, localDateString } from "../skylight/ids.js";
+import { assertDate, assertId, assertTime, localDateString, parseChoreId } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
-import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES } from "../skylight/vocab.js";
+import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { ANNOTATIONS, run } from "./result.js";
 
@@ -31,9 +31,10 @@ export const choreInputShape = {
   emoji: z.string().optional().describe("Single emoji icon."),
 };
 
-const applyToSchema = EXPOSED_APPLY_TO_VALUES.length > 0
-  ? z.enum(EXPOSED_APPLY_TO_VALUES as [string, ...string[]]).optional().describe("\"all\" = apply to the whole recurring series. Omit for one-off chores. (Per-occurrence scopes are not available yet.)")
-  : undefined;
+const deleteApplyToSchema = z.enum(EXPOSED_APPLY_TO_VALUES as [string, ...string[]]).optional()
+  .describe("Scope for a recurring chore. \"one\" = only that occurrence, \"future\" = that occurrence and all later ones (both need the occurrence date), \"all\" = the whole series. Omit for one-time chores.");
+const updateApplyToSchema = z.enum(EXPOSED_UPDATE_APPLY_TO_VALUES as [string, ...string[]]).optional()
+  .describe("\"all\" = apply to the whole recurring series. Omit for one-off chores. (Per-occurrence scopes are not available for update.)");
 
 function choresPath(frameId: string): string {
   return `/api/frames/${frameId}/chores`;
@@ -56,29 +57,55 @@ function stopReason(e: unknown): string | null {
   return null;
 }
 
-async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: string): Promise<string | null> {
+async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: string, seriesId: string): Promise<string | null> {
   const today = new Date();
   const iso = localDateString;
   const after = new Date(today); after.setDate(after.getDate() - 365);
   const before = new Date(today); before.setDate(before.getDate() + 365);
   try {
     const chores = mapChores(await ctx.client.request({ method: "GET", path: choresPath(frameId), query: { after: iso(after), before: iso(before), include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" } }));
-    return chores.find((c) => c.id === choreId)?.summary ?? null;
+    const hit = chores.find((c) => c.id === choreId) ?? chores.find((c) => c.id === seriesId || c.seriesId === seriesId);
+    return hit?.summary ?? null;
   } catch {
     return null;
   }
 }
+
+/** Resolve the occurrence date from a composite choreId and/or an explicit instanceDate. */
+function resolveInstanceDate(refDate: string | null, instanceDate: string | undefined): string | null {
+  const explicit = instanceDate === undefined ? null : assertDate(instanceDate, "instanceDate");
+  if (refDate !== null && explicit !== null && refDate !== explicit) {
+    throw new ValidationError("instanceDate", "does not match the date in choreId");
+  }
+  return refDate ?? explicit;
+}
+
+/** Turn Skylight's two instance_date 422s into actionable validation errors; anything else passes through. */
+function mapCompletionError(e: unknown): unknown {
+  if (e instanceof SkylightApiError && e.status === 422 && e.message.includes("instance_date")) {
+    if (e.message.includes("can't be blank")) return new ValidationError("instanceDate", "this chore is recurring; pass the occurrence date");
+    if (e.message.includes("must be blank")) return new ValidationError("instanceDate", "this is a one-time chore; omit instanceDate");
+  }
+  return e;
+}
+
+const DELETE_SCOPE_TEXT = {
+  all: "every occurrence of this recurring chore",
+  future: "this occurrence and all later ones",
+  one: "only this occurrence",
+  none: "this chore",
+} as const;
 
 export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
     "skylight_list_chores",
     {
       title: "List chores",
-      description: "List chores and routine steps in a date range (default: today through 14 days ahead). Returns ids needed for update, complete and delete.",
+      description: "List chores and routine steps in a date range (default: today through 14 days ahead). Returns ids needed for update, complete and delete. Recurring occurrences carry a seriesId and an instanceDate: pass the chore's id (or seriesId plus instanceDate) to complete and delete.",
       inputSchema: {
         after: z.string().optional().describe("Start date YYYY-MM-DD (inclusive). Default today."),
         before: z.string().optional().describe("End date YYYY-MM-DD (inclusive). Default 14 days from today."),
-        includeLate: z.boolean().optional().describe("Include overdue chores. Default true."),
+        includeLate: z.boolean().optional().describe("Also return overdue (late) occurrences from before the window. Default false; can be large."),
         includeUpForGrabs: z.boolean().optional().describe("Include unassigned up-for-grabs chores. Default false."),
       },
       annotations: ANNOTATIONS.read,
@@ -89,10 +116,18 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const before = assertDate(args.before ?? new Date(Date.parse(`${after}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10), "before");
       if (after > before) throw new ValidationError("after", "must not be later than before");
       const frameId = await ctx.frames.resolve();
-      return mapChores(await ctx.client.request({
+      const chores = mapChores(await ctx.client.request({
         method: "GET", path: choresPath(frameId),
-        query: { after, before, include_late: args.includeLate ?? true, include_up_for_grabs: args.includeUpForGrabs ?? false, filter: "linked_to_profile" },
+        query: { after, before, include_late: args.includeLate ?? false, include_up_for_grabs: args.includeUpForGrabs ?? false, filter: "linked_to_profile" },
       }));
+      return chores.sort((a, b) => {
+        if (a.instanceDate !== b.instanceDate) {
+          if (a.instanceDate === null) return 1;
+          if (b.instanceDate === null) return -1;
+          return a.instanceDate < b.instanceDate ? -1 : 1;
+        }
+        return a.summary < b.summary ? -1 : a.summary > b.summary ? 1 : 0;
+      });
     })
   );
 
@@ -155,7 +190,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       title: "Update a chore",
       description: "Change fields on an existing chore or routine step. Only the provided fields change.",
       inputSchema: {
-        choreId: z.string().describe("Chore id from skylight_list_chores."),
+        choreId: z.string().describe("Chore id from skylight_list_chores (plain or series-date form)."),
         summary: choreInputShape.summary.optional(),
         start: choreInputShape.start.optional(),
         profileIds: choreInputShape.profileIds.optional().describe("Replace the assigned profiles."),
@@ -165,13 +200,13 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         upForGrabs: choreInputShape.upForGrabs,
         rewardPoints: choreInputShape.rewardPoints,
         emoji: choreInputShape.emoji,
-        ...(applyToSchema ? { applyTo: applyToSchema } : {}),
+        applyTo: updateApplyToSchema,
       },
       annotations: ANNOTATIONS.update,
     },
     (args) => run(async () => {
       const { choreId, applyTo, ...rest } = args as Record<string, unknown> & { choreId: string; applyTo?: string };
-      const id = assertId(choreId, "choreId");
+      const { seriesId: id } = parseChoreId(choreId, "choreId");
       const body: Record<string, unknown> = buildChoreUpdateBody(rest as Partial<ChoreInput>);
       if (applyTo !== undefined) body.apply_to = applyTo;
       const frameId = await ctx.frames.resolve();
@@ -184,24 +219,35 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_delete_chore",
     {
       title: "Delete a chore",
-      description: "Delete a chore or routine step. For a recurring chore, applyTo: \"all\" deletes every occurrence. Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
+      description: "Delete a chore or routine step. One-time chore: omit applyTo. Recurring chore: applyTo \"all\" deletes every occurrence, \"future\" deletes the given occurrence and all later ones, \"one\" deletes only the given occurrence. \"one\" and \"future\" need the occurrence date: pass a composite choreId such as \"123-2026-10-13\" or the plain id plus instanceDate (both come from skylight_list_chores). Without confirm: true this makes NO change and returns what would be deleted. Show that to the user and only call again with confirm: true after they agree.",
       inputSchema: {
-        choreId: z.string().describe("Chore id from skylight_list_chores."),
+        choreId: z.string().describe("Chore id from skylight_list_chores (plain or series-date form)."),
+        instanceDate: z.string().optional().describe("YYYY-MM-DD occurrence to anchor applyTo \"one\" or \"future\" on, if choreId is the plain series id."),
         confirm: z.boolean().optional().describe("Must be true to actually delete. Ask the user first."),
-        ...(applyToSchema ? { applyTo: applyToSchema } : {}),
+        applyTo: deleteApplyToSchema,
       },
       annotations: ANNOTATIONS.destroy,
     },
     (args) => run(async () => {
-      const { choreId, confirm, applyTo } = args as { choreId: string; confirm?: boolean; applyTo?: string };
-      const id = assertId(choreId, "choreId");
+      const { choreId, confirm, applyTo, instanceDate } = args as { choreId: string; confirm?: boolean; applyTo?: string; instanceDate?: string };
+      const ref = parseChoreId(choreId, "choreId");
+      const date = resolveInstanceDate(ref.instanceDate, instanceDate);
+      const anchored = applyTo === "one" || applyTo === "future";
+      if (anchored && date === null) {
+        throw new ValidationError("instanceDate", `applyTo "${applyTo}" needs the occurrence date: pass a composite choreId (seriesId-YYYY-MM-DD) or instanceDate`);
+      }
+      const path = anchored ? `${ref.seriesId}-${date}` : ref.seriesId;
       const frameId = await ctx.frames.resolve();
       if (confirm !== true) {
-        const scope = applyTo === "all" ? " This would delete the whole recurring series." : "";
-        return { confirmed: false, wouldDelete: { id, summary: await findChoreSummary(ctx, frameId, id), applyTo: applyTo ?? null }, message: `Nothing was deleted.${scope} Ask the user to confirm, then call again with confirm: true.` };
+        const scope = DELETE_SCOPE_TEXT[(applyTo as keyof typeof DELETE_SCOPE_TEXT | undefined) ?? "none"];
+        return {
+          confirmed: false,
+          wouldDelete: { seriesId: ref.seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null, summary: await findChoreSummary(ctx, frameId, choreId, ref.seriesId) },
+          message: `Nothing was deleted. This would delete ${scope}. Ask the user to confirm, then call again with confirm: true.`,
+        };
       }
-      await ctx.client.request({ method: "DELETE", path: `${choresPath(frameId)}/${id}`, query: applyTo === undefined ? {} : { apply_to: applyTo } });
-      return { deleted: true, id };
+      await ctx.client.request({ method: "DELETE", path: `${choresPath(frameId)}/${path}`, query: applyTo === undefined ? {} : { apply_to: applyTo } });
+      return { deleted: true, seriesId: ref.seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null };
     })
   );
 
@@ -209,28 +255,36 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_complete_chore",
     {
       title: "Mark a chore done or not done",
-      description: "Mark one instance of a chore complete (done: true, the default) or revert it (done: false) for a profile on a given date.",
+      description: "Mark a chore complete (done: true, the default) or revert it (done: false). Recurring chores need the occurrence date (the chore's instanceDate from skylight_list_chores, or a composite choreId); one-time chores must omit it.",
       inputSchema: {
-        choreId: z.string().describe("Chore (series) id."),
-        instanceDate: z.string().describe("Instance date YYYY-MM-DD."),
-        profileId: z.string().describe("Profile id the completion belongs to."),
+        choreId: z.string().describe("Chore id from skylight_list_chores (plain or series-date form)."),
+        instanceDate: z.string().optional().describe("YYYY-MM-DD. Required for recurring chores (use the chore's instanceDate from skylight_list_chores). Omit for one-time chores."),
+        profileId: z.string().optional().describe("Only for up-for-grabs chores: which profile completed it. Omit for chores assigned to a profile."),
         done: z.boolean().optional().describe("Default true."),
         instanceTime: z.string().optional().describe("HH:mm, only for timed instances."),
       },
       annotations: ANNOTATIONS.update,
     },
     (args) => run(async () => {
-      const id = assertId(args.choreId, "choreId");
-      const instanceDate = assertDate(args.instanceDate, "instanceDate");
-      const profileId = assertId(args.profileId, "profileId");
+      const ref = parseChoreId(args.choreId, "choreId");
+      const instanceDate = resolveInstanceDate(ref.instanceDate, args.instanceDate);
+      const profileId = args.profileId === undefined ? null : assertId(args.profileId, "profileId");
       const instanceTime = args.instanceTime === undefined ? null : assertTime(args.instanceTime, "instanceTime");
       const status = args.done === false ? CHORE_STATUS.notDone : CHORE_STATUS.done;
       const frameId = await ctx.frames.resolve();
-      const json = await ctx.client.request<unknown>({
-        method: "PUT", path: `${choresPath(frameId)}/${id}/completions`,
-        body: { status, instance_date: instanceDate, instance_time: instanceTime, category_id: profileId },
-      });
-      return { id, instanceDate, profileId, status, chore: mapChore((json as { data?: unknown })?.data) };
+      const body: Record<string, unknown> = {
+        status,
+        ...(instanceDate !== null ? { instance_date: instanceDate } : {}),
+        ...(instanceTime !== null ? { instance_time: instanceTime } : {}),
+        ...(profileId !== null ? { category_id: profileId } : {}),
+      };
+      let json: unknown;
+      try {
+        json = await ctx.client.request<unknown>({ method: "PUT", path: `${choresPath(frameId)}/${ref.seriesId}/completions`, body });
+      } catch (e) {
+        throw mapCompletionError(e);
+      }
+      return { seriesId: ref.seriesId, instanceDate, status, chore: mapChore((json as { data?: unknown })?.data) };
     })
   );
 }

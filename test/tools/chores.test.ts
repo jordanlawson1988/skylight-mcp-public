@@ -13,7 +13,7 @@ test("list chores passes query and maps", async () => {
   assert.equal((r.data as Array<{ summary: string }>)[0]!.summary, "Dishes");
   const q = t.calls.at(-1)!.url.searchParams;
   assert.equal(q.get("after"), "2026-10-01");
-  assert.equal(q.get("include_late"), "true");
+  assert.equal(q.get("include_late"), "false");
   assert.equal(q.get("include_up_for_grabs"), "false");
   assert.equal(q.get("filter"), "linked_to_profile");
   await t.close();
@@ -123,35 +123,145 @@ test("delete without confirm sends no request and returns preview", async () => 
   const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [chore("5", "Dishes")] } }]);
   const r = await t.callTool("skylight_delete_chore", { choreId: "5" });
   assert.equal(r.isError, false);
-  const d = r.data as { confirmed: boolean; wouldDelete: { id: string; summary: string | null } };
+  const d = r.data as { confirmed: boolean; wouldDelete: { seriesId: string; instanceDate: string | null; applyTo: string | null; summary: string | null }; message: string };
   assert.equal(d.confirmed, false);
-  assert.equal(d.wouldDelete.id, "5");
-  assert.equal(d.wouldDelete.summary, "Dishes");
+  assert.deepEqual(d.wouldDelete, { seriesId: "5", instanceDate: null, applyTo: null, summary: "Dishes" });
+  assert.match(d.message, /this chore/);
   assert.ok(!t.calls.some((c) => c.method === "DELETE"));
   await t.close();
 });
 
-test("delete with confirm sends DELETE", async () => {
-  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5", status: 204, text: "" }]);
-  const r = await t.callTool("skylight_delete_chore", { choreId: "5", confirm: true });
-  assert.equal(r.isError, false);
-  assert.deepEqual(r.data, { deleted: true, id: "5" });
-  assert.equal(t.calls.at(-1)!.method, "DELETE");
+test("delete preview describes each scope and finds the summary via a composite id", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [{ id: "5-2026-10-14", attributes: { summary: "Dishes", series: "5", start: "2026-10-13" } }] } }]);
+  const all = (await t.callTool("skylight_delete_chore", { choreId: "5", applyTo: "all" })).data as { wouldDelete: Record<string, unknown>; message: string };
+  assert.deepEqual(all.wouldDelete, { seriesId: "5", instanceDate: null, applyTo: "all", summary: "Dishes" });
+  assert.match(all.message, /every occurrence of this recurring chore/);
+  const fut = (await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", applyTo: "future" })).data as { wouldDelete: Record<string, unknown>; message: string };
+  assert.deepEqual(fut.wouldDelete, { seriesId: "5", instanceDate: "2026-10-14", applyTo: "future", summary: "Dishes" });
+  assert.match(fut.message, /this occurrence and all later ones/);
+  const one = (await t.callTool("skylight_delete_chore", { choreId: "5", instanceDate: "2026-10-14", applyTo: "one" })).data as { wouldDelete: Record<string, unknown>; message: string };
+  assert.deepEqual(one.wouldDelete, { seriesId: "5", instanceDate: "2026-10-14", applyTo: "one", summary: "Dishes" });
+  assert.match(one.message, /only this occurrence/);
+  assert.ok(!t.calls.some((c) => c.method === "DELETE"));
   await t.close();
 });
 
-test("complete chore PUTs completions with vocab status", async () => {
+test("delete with confirm and no applyTo sends DELETE on the series id with no apply_to", async () => {
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5", status: 204, text: "" }]);
+  const r = await t.callTool("skylight_delete_chore", { choreId: "5", confirm: true });
+  assert.equal(r.isError, false);
+  const last = t.calls.at(-1)!;
+  assert.equal(last.method, "DELETE");
+  assert.equal(last.url.pathname, "/api/frames/77/chores/5");
+  assert.equal(last.url.searchParams.has("apply_to"), false);
+  await t.close();
+});
+
+test("delete applyTo all uses the series id even when given a composite id", async () => {
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5", status: 204, text: "" }]);
+  const r = await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", confirm: true, applyTo: "all" });
+  assert.equal(r.isError, false);
+  const last = t.calls.at(-1)!;
+  assert.equal(last.url.pathname, "/api/frames/77/chores/5");
+  assert.equal(last.url.searchParams.get("apply_to"), "all");
+  await t.close();
+});
+
+test("delete applyTo one/future anchors on seriesId-date in the path", async () => {
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5-2026-10-14", status: 204, text: "" }]);
+  for (const [args, scope] of [
+    [{ choreId: "5-2026-10-14", applyTo: "one" }, "one"],
+    [{ choreId: "5", instanceDate: "2026-10-14", applyTo: "future" }, "future"],
+  ] as const) {
+    const r = await t.callTool("skylight_delete_chore", { ...args, confirm: true });
+    assert.equal(r.isError, false);
+    const last = t.calls.at(-1)!;
+    assert.equal(last.url.pathname, "/api/frames/77/chores/5-2026-10-14");
+    assert.equal(last.url.searchParams.get("apply_to"), scope);
+  }
+  await t.close();
+});
+
+test("delete applyTo one/future without a date, or with a mismatched date, is rejected before any request", async () => {
+  const t = await connectTestClient([FRAMES]);
+  for (const applyTo of ["one", "future"]) {
+    for (const confirm of [false, true]) {
+      const r = await t.callTool("skylight_delete_chore", { choreId: "5", applyTo, confirm });
+      assert.equal(r.isError, true);
+      assert.match(r.text, /instanceDate/);
+    }
+  }
+  const mm = await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", instanceDate: "2026-10-15", applyTo: "one", confirm: true });
+  assert.equal(mm.isError, true);
+  assert.match(mm.text, /does not match the date in choreId/);
+  assert.ok(!t.calls.some((c) => c.method === "DELETE" || c.url.pathname.endsWith("/chores")));
+  await t.close();
+});
+
+test("complete chore without a date sends only status", async () => {
   const { CHORE_STATUS } = await import("../../src/skylight/vocab.js");
   const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5/completions", json: { data: chore("5", "Dishes") } }]);
-  const r = await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13", profileId: "12" });
+  const r = await t.callTool("skylight_complete_chore", { choreId: "5" });
   assert.equal(r.isError, false);
-  const body = t.calls.at(-1)!.body as Record<string, unknown>;
-  assert.equal(body.status, CHORE_STATUS.done);
-  assert.equal(body.instance_date, "2026-10-13");
-  assert.equal(body.category_id, "12");
-  const undo = await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13", profileId: "12", done: false });
-  assert.equal((t.calls.at(-1)!.body as Record<string, unknown>).status, CHORE_STATUS.notDone);
+  assert.deepEqual(t.calls.at(-1)!.body, { status: CHORE_STATUS.done });
+  assert.deepEqual(Object.keys(r.data as object).sort(), ["chore", "instanceDate", "seriesId", "status"]);
+  const undo = await t.callTool("skylight_complete_chore", { choreId: "5", done: false });
+  assert.deepEqual(t.calls.at(-1)!.body, { status: CHORE_STATUS.notDone });
   assert.equal(undo.isError, false);
+  await t.close();
+});
+
+test("complete chore with a composite id uses the series id in the path and sends instance_date", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5/completions", json: { data: chore("5", "Dishes") } }]);
+  const r = await t.callTool("skylight_complete_chore", { choreId: "5-2026-10-13" });
+  assert.equal(r.isError, false);
+  assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/5/completions");
+  assert.deepEqual(t.calls.at(-1)!.body, { status: "complete", instance_date: "2026-10-13" });
+  const d = r.data as { seriesId: string; instanceDate: string };
+  assert.deepEqual({ s: d.seriesId, d: d.instanceDate }, { s: "5", d: "2026-10-13" });
+  const ok2 = await t.callTool("skylight_complete_chore", { choreId: "5-2026-10-13", instanceDate: "2026-10-13" });
+  assert.equal(ok2.isError, false);
+  await t.close();
+});
+
+test("complete chore with a plain id plus instanceDate sends instance_date; time and profile only when given", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5/completions", json: { data: chore("5", "Dishes") } }]);
+  await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13" });
+  assert.deepEqual(t.calls.at(-1)!.body, { status: "complete", instance_date: "2026-10-13" });
+  await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13", instanceTime: "07:30", profileId: "12" });
+  assert.deepEqual(t.calls.at(-1)!.body, { status: "complete", instance_date: "2026-10-13", instance_time: "07:30", category_id: "12" });
+  await t.close();
+});
+
+test("complete chore rejects a mismatched instanceDate without a request", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const r = await t.callTool("skylight_complete_chore", { choreId: "5-2026-10-13", instanceDate: "2026-10-14" });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /instanceDate: does not match the date in choreId/);
+  assert.ok(!t.calls.some((c) => c.method === "PUT"));
+  await t.close();
+});
+
+test("complete chore maps the two instance_date 422s to guidance and leaves other errors alone", async () => {
+  const mk = (text: string, status = 422) => connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5/completions", status, text }]);
+  let t = await mk('{"errors":{"instance_date":["can\'t be blank"]}}');
+  let r = await t.callTool("skylight_complete_chore", { choreId: "5" });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /instanceDate: this chore is recurring; pass the occurrence date/);
+  await t.close();
+  t = await mk('{"errors":{"instance_date":["must be blank"]}}');
+  r = await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13" });
+  assert.match(r.text, /instanceDate: this is a one-time chore; omit instanceDate/);
+  await t.close();
+  t = await mk('{"errors":{"category_id":["must be blank"]}}');
+  r = await t.callTool("skylight_complete_chore", { choreId: "5", profileId: "12" });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /422/);
+  assert.match(r.text, /category_id/);
+  await t.close();
+  t = await mk("boom", 500);
+  r = await t.callTool("skylight_complete_chore", { choreId: "5" });
+  assert.match(r.text, /500/);
   await t.close();
 });
 
@@ -163,34 +273,51 @@ test("update chore with applyTo puts apply_to in the PUT body", async () => {
   await t.close();
 });
 
-test("delete chore with applyTo puts apply_to in the DELETE query", async () => {
-  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/5", status: 204, text: "" }]);
-  const r = await t.callTool("skylight_delete_chore", { choreId: "5", confirm: true, applyTo: "all" });
-  assert.equal(r.isError, false);
-  const last = t.calls.at(-1)!;
-  assert.equal(last.method, "DELETE");
-  assert.equal(last.url.searchParams.get("apply_to"), "all");
+test("update rejects applyTo values other than all, and delete rejects bogus; no PUT or DELETE is sent", async () => {
+  const t = await connectTestClient([FRAMES]);
+  for (const applyTo of ["bogus", "future", "one"]) {
+    let rejected = false;
+    try { rejected = (await t.callTool("skylight_update_chore", { choreId: "5", summary: "x", applyTo })).isError; } catch { rejected = true; }
+    assert.ok(rejected, `update should reject applyTo: ${applyTo}`);
+  }
+  let bogus = false;
+  try { bogus = (await t.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", confirm: true, applyTo: "bogus" })).isError; } catch { bogus = true; }
+  assert.ok(bogus);
+  assert.ok(!t.calls.some((c) => c.method === "PUT" || c.method === "DELETE"));
   await t.close();
 });
 
-test("unsupported applyTo values (future, bogus) are rejected and no PUT or DELETE is sent", async () => {
-  const t = await connectTestClient([FRAMES]);
-  for (const [name, args] of [
-    ["skylight_update_chore", { choreId: "5", summary: "x", applyTo: "bogus" }],
-    ["skylight_delete_chore", { choreId: "5", confirm: true, applyTo: "bogus" }],
-    ["skylight_update_chore", { choreId: "5", summary: "x", applyTo: "future" }],
-    ["skylight_delete_chore", { choreId: "5", confirm: true, applyTo: "future" }],
-  ] as const) {
-    let rejected = false;
-    try {
-      const r = await t.callTool(name, args);
-      rejected = r.isError;
-    } catch {
-      rejected = true;
-    }
-    assert.ok(rejected, `${name} should reject applyTo: bogus`);
-  }
-  assert.ok(!t.calls.some((c) => c.method === "PUT" || c.method === "DELETE"));
+test("update chore with a composite id puts to the series id", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "New") } }]);
+  const r = await t.callTool("skylight_update_chore", { choreId: "5-2026-10-14", summary: "New", applyTo: "all" });
+  assert.equal(r.isError, false);
+  assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/5");
+  assert.deepEqual(t.calls.at(-1)!.body, { summary: "New", apply_to: "all" });
+  await t.close();
+});
+
+test("list chores: include_late is false by default and true with includeLate", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }]);
+  await t.callTool("skylight_list_chores", { after: "2026-10-01", before: "2026-10-02" });
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("include_late"), "false");
+  await t.callTool("skylight_list_chores", { after: "2026-10-01", before: "2026-10-02", includeLate: true });
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("include_late"), "true");
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("filter"), "linked_to_profile");
+  await t.close();
+});
+
+test("list chores sorts by instanceDate (nulls last) then summary and exposes seriesId", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [
+    { id: "9", attributes: { summary: "Zed" } },
+    { id: "5-2026-10-14", attributes: { summary: "Bed", series: "5" } },
+    { id: "6", attributes: { summary: "Dishes", start: "2026-10-13" } },
+    { id: "7", attributes: { summary: "Alpha", start: "2026-10-13" } },
+  ] } }]);
+  const r = await t.callTool("skylight_list_chores", { after: "2026-10-01", before: "2026-10-31" });
+  const d = r.data as Array<{ id: string; seriesId: string; instanceDate: string | null }>;
+  assert.deepEqual(d.map((c) => c.id), ["7", "6", "5-2026-10-14", "9"]);
+  assert.equal(d[2]!.seriesId, "5");
+  assert.equal(d[2]!.instanceDate, "2026-10-14");
   await t.close();
 });
 
@@ -253,16 +380,6 @@ test("bulk create stops after a 429 and marks the rest not attempted", async () 
   await t.close();
 });
 
-test("delete preview echoes applyTo scope", async () => {
-  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [chore("5", "Dishes")] } }]);
-  const r = await t.callTool("skylight_delete_chore", { choreId: "5", applyTo: "all" });
-  const d = r.data as { wouldDelete: { applyTo: string | null }; message: string };
-  assert.equal(d.wouldDelete.applyTo, "all");
-  assert.match(d.message, /whole recurring series/);
-  assert.ok(!t.calls.some((c) => c.method === "DELETE"));
-  await t.close();
-});
-
 test("list chores defaults before to after + 14 days", async () => {
   const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }]);
   const r = await t.callTool("skylight_list_chores", { after: "2027-01-01" });
@@ -273,7 +390,7 @@ test("list chores defaults before to after + 14 days", async () => {
 
 test("complete chore rejects a malformed instanceTime without a request", async () => {
   const t = await connectTestClient([FRAMES]);
-  const r = await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13", profileId: "12", instanceTime: "25:99" });
+  const r = await t.callTool("skylight_complete_chore", { choreId: "5", instanceDate: "2026-10-13", instanceTime: "25:99" });
   assert.equal(r.isError, true);
   assert.ok(!t.calls.some((c) => c.method === "PUT"));
   await t.close();
