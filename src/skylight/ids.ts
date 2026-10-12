@@ -2,6 +2,7 @@ import { ValidationError } from "./errors.js";
 
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+const CONTROL_EXCEPT_LAYOUT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/;
 
 export function assertId(value: string | number, field: string): string {
   const s = typeof value === "number" ? String(value) : value;
@@ -72,6 +73,33 @@ export function cleanText(value: string, field: string, max: number): string {
   if (out.length === 0) throw new ValidationError(field, "must not be blank");
   if (out.length > max) throw new ValidationError(field, `must be at most ${max} characters`);
   return out;
+}
+
+/** Like cleanText for multi-line text (recipe and meal descriptions): newlines and tabs are kept (CRLF becomes LF), other control characters are refused. */
+export function cleanParagraph(value: string, field: string, max: number): string {
+  if (typeof value !== "string") throw new ValidationError(field, "must be a string");
+  if (!value.isWellFormed()) throw new ValidationError(field, "must be well-formed unicode");
+  const normalized = value.replaceAll("\r\n", "\n");
+  if (CONTROL_EXCEPT_LAYOUT.test(normalized)) throw new ValidationError(field, "must not contain control characters");
+  const out = normalized.normalize("NFC").trim();
+  if (out.length === 0) throw new ValidationError(field, "must not be blank");
+  if (out.length > max) throw new ValidationError(field, `must be at most ${max} characters`);
+  return out;
+}
+
+const EMAIL_PATTERN = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
+/** A plain email address, trimmed and lower-cased. */
+export function assertEmail(value: string, field: string): string {
+  const out = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (out.length === 0 || out.length > 254 || !EMAIL_PATTERN.test(out)) throw new ValidationError(field, "must be an email address like name@example.com");
+  return out;
+}
+
+/** 0..max emails, each validated, de-duplicated case-insensitively with the first occurrence kept. */
+export function assertEmails(values: string[], field: string, max: number): string[] {
+  if (!Array.isArray(values) || values.length > max) throw new ValidationError(field, `must list at most ${max} email addresses`);
+  return [...new Set(values.map((v) => assertEmail(v, field)))];
 }
 
 export function assertEmoji(value: string, field: string): string {

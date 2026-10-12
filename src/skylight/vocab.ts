@@ -42,3 +42,28 @@ export const DEFAULT_LIST_COLOR = "#42D792";
 // Calendar events: `source` is "skylight" for events created here or in the app; anything else comes from a synced calendar (e.g. "google") and is read-only for us.
 export const OWN_EVENT_SOURCE = "skylight";
 export const EVENT_KIND = "standard";
+
+// Toolsets: SKYLIGHT_TOOLSETS picks which tool groups the server registers (skylight_auth_status is always registered).
+export const TOOLSETS = ["profiles", "chores", "rewards", "lists", "calendar", "meals", "photos", "devices", "frame", "account"] as const;
+export type Toolset = (typeof TOOLSETS)[number];
+
+// Meals (verified live 2026-10-12): a sitting that repeats takes apply_to one|future|all on update and delete; a one-time sitting takes none.
+export const MEAL_SCOPE = { one: "one", future: "future", all: "all" } as const;
+export type MealScope = keyof typeof MEAL_SCOPE;
+export const EXPOSED_MEAL_APPLY_TO_VALUES: readonly string[] = Object.values(MEAL_SCOPE);
+export const MEAL_SCOPE_TEXT = { one: "only this date", future: "this date and later", all: "every date of this meal", none: "this meal" } as const;
+/** The app writes a recipe description as "Ingredients:\n- a\n\nInstructions:\n1. x\n"; these are the two section headings. */
+export const RECIPE_HEADINGS = { ingredients: "Ingredients:", instructions: "Instructions:" } as const;
+/** Skylight writes a sitting's repeat rule without the "RRULE:" prefix (and stores one sent with it stripped). */
+export const RRULE_PREFIX = "RRULE:";
+
+// Devices: current_album_id -1 means the slideshow plays every photo.
+export const ALL_PHOTOS_ALBUM_ID = -1;
+export const ALL_PHOTOS = "all";
+
+// Frame sharing (bundle + live 2026-10-12): blocking a user makes their status "rejected"; approving moves it back to "approved".
+export const FRAME_USER_STATUS = { approved: "approved", blocked: "rejected", awaitingApproval: "awaiting_approval" } as const;
+
+// feature_bundle keys shown under another name (the bundle calls meal planning "meal_planning").
+const FEATURE_NAMES: Readonly<Record<string, string>> = { meal_planning: "meals" };
+export const featureName = (key: string): string => FEATURE_NAMES[key] ?? key;

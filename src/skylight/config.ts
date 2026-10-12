@@ -3,6 +3,7 @@ import path from "node:path";
 import { ValidationError } from "./errors.js";
 import { assertId } from "./ids.js";
 import { DEFAULT_TIMEZONE, isValidTimezone } from "./time.js";
+import { TOOLSETS, type Toolset } from "./vocab.js";
 
 export interface SkylightConfig {
   apiBaseUrl: string;
@@ -14,6 +15,10 @@ export interface SkylightConfig {
   timezone: string;
   /** True when SKYLIGHT_TIMEZONE was set (so doctor puts it in the Claude Desktop config). */
   timezoneExplicit: boolean;
+  /** Tool groups to register (skylight_auth_status is always registered). Every group unless SKYLIGHT_TOOLSETS narrows it. */
+  toolsets: Set<Toolset>;
+  /** True when SKYLIGHT_TOOLSETS was set (so doctor puts it in the Claude Desktop config). */
+  toolsetsExplicit: boolean;
 }
 
 export const DEFAULT_API_BASE = "https://app.ourskylight.com";
@@ -32,6 +37,17 @@ function normalizeBase(raw: string): string {
   return url.origin;
 }
 
+function parseToolsets(raw: string | undefined): { toolsets: Set<Toolset>; explicit: boolean } {
+  const text = raw?.trim() ?? "";
+  if (text === "") return { toolsets: new Set(TOOLSETS), explicit: false };
+  const names = text.split(",").map((n) => n.trim().toLowerCase()).filter((n) => n !== "");
+  if (names.length === 0) throw new ValidationError("SKYLIGHT_TOOLSETS", `must name at least one of ${TOOLSETS.join(", ")}`);
+  const known = new Set<string>(TOOLSETS);
+  const unknown = [...new Set(names.filter((n) => !known.has(n)))];
+  if (unknown.length > 0) throw new ValidationError("SKYLIGHT_TOOLSETS", `unknown toolset ${unknown.map((n) => `"${n}"`).join(", ")}; choose from ${TOOLSETS.join(", ")}`);
+  return { toolsets: new Set(names as Toolset[]), explicit: true };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SkylightConfig {
   const apiBaseUrl = env.SKYLIGHT_API_BASE ? normalizeBase(env.SKYLIGHT_API_BASE) : DEFAULT_API_BASE;
   const timeoutRaw = env.SKYLIGHT_REQUEST_TIMEOUT_MS;
@@ -46,5 +62,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SkylightConfig
   const tzRaw = env.SKYLIGHT_TIMEZONE?.trim();
   if (tzRaw && !isValidTimezone(tzRaw)) throw new ValidationError("SKYLIGHT_TIMEZONE", "must be an IANA timezone such as America/New_York");
   const timezone = tzRaw || DEFAULT_TIMEZONE;
-  return { apiBaseUrl, apiVersion: DEFAULT_API_VERSION, requestTimeoutMs, credentialsDir, frameId, timezone, timezoneExplicit: Boolean(tzRaw) };
+  const { toolsets, explicit: toolsetsExplicit } = parseToolsets(env.SKYLIGHT_TOOLSETS);
+  return { apiBaseUrl, apiVersion: DEFAULT_API_VERSION, requestTimeoutMs, credentialsDir, frameId, timezone, timezoneExplicit: Boolean(tzRaw), toolsets, toolsetsExplicit };
 }

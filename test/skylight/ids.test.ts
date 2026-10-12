@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, assertEmoji, assertPoints } from "../../src/skylight/ids.js";
+import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, cleanParagraph, assertEmail, assertEmails, assertEmoji, assertPoints } from "../../src/skylight/ids.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 test("assertId accepts simple ids and numbers", () => {
@@ -85,4 +85,28 @@ test("parseEventId rejects anything that is not <digits> or <digits>-<digits>", 
   for (const bad of ["", "abc", "12-", "-12", "12-34-56", "12-ab", "../1", "1/2", "12-2026-10-12"]) {
     assert.throws(() => parseEventId(bad, "eventId"), (e: unknown) => e instanceof ValidationError && e.field === "eventId", bad);
   }
+});
+
+test("cleanParagraph keeps newlines and tabs, normalizes CRLF, and still rejects other control characters", () => {
+  assert.equal(cleanParagraph("  Ingredients:\r\n- a\n\nInstructions:\n1. x\n  ", "d", 500), "Ingredients:\n- a\n\nInstructions:\n1. x");
+  assert.equal(cleanParagraph("a\tb", "d", 10), "a\tb");
+  assert.throws(() => cleanParagraph("a\u0000b", "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("a\u001bb", "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("  \n ", "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("x".repeat(11), "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("\ud800", "d", 10), ValidationError);
+});
+
+test("assertEmail accepts ordinary addresses (lower-cased) and rejects the rest", () => {
+  assert.equal(assertEmail("  Mom.Smith+skylight@Example.COM ", "email"), "mom.smith+skylight@example.com");
+  for (const bad of ["", "plain", "a@b", "a@b.c", "a b@c.com", "a@@c.com", "@c.com", "a@c..com", "a\n@c.com", `${"x".repeat(250)}@c.com`, "a@c.com,b@c.com"]) {
+    assert.throws(() => assertEmail(bad, "email"), (e: unknown) => e instanceof ValidationError && e.field === "email", bad);
+  }
+});
+
+test("assertEmails dedupes case-insensitively, keeps order, bounds the count and names the bad entry", () => {
+  assert.deepEqual(assertEmails(["B@x.com", "a@x.com", "b@X.com"], "invitedEmails", 20), ["b@x.com", "a@x.com"]);
+  assert.deepEqual(assertEmails([], "invitedEmails", 20), []);
+  assert.throws(() => assertEmails(Array.from({ length: 21 }, (_, i) => `u${i}@x.com`), "invitedEmails", 20), ValidationError);
+  assert.throws(() => assertEmails(["a@x.com", "nope"], "invitedEmails", 20), (e: unknown) => e instanceof ValidationError && /invitedEmails/.test(e.message));
 });

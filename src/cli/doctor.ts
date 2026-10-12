@@ -26,6 +26,7 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
   const s = await status(rt);
   lines.push(`API host:   ${s.apiHost}`);
   lines.push(`Timezone:   ${rt.config.timezone} (set SKYLIGHT_TIMEZONE to change)`);
+  lines.push(`Toolsets:   ${rt.config.toolsetsExplicit ? [...rt.config.toolsets].join(", ") : "all"} (set SKYLIGHT_TOOLSETS to a comma list to trim the tool list)`);
   if (!s.loggedIn) {
     if (s.credentialError) lines.push(`Login:      credential problem: ${s.credentialError}`);
     else lines.push(`Login:      not logged in. Run: skylight-mcp login`);
@@ -53,6 +54,7 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
   const env: Record<string, string> = {};
   if (rt.config.frameId) env.SKYLIGHT_FRAME_ID = rt.config.frameId;
   if (rt.config.timezoneExplicit) env.SKYLIGHT_TIMEZONE = rt.config.timezone;
+  if (rt.config.toolsetsExplicit) env.SKYLIGHT_TOOLSETS = [...rt.config.toolsets].join(",");
   const config = { mcpServers: { skylight: { command: stableNodePath(), args: [serverPath], ...(Object.keys(env).length ? { env } : {}) } } };
   lines.push(``, `Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):`, ``, JSON.stringify(config, null, 2), ``);
   return `${lines.join("\n")}\n`;

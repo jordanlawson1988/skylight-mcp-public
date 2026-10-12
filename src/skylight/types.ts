@@ -1,6 +1,6 @@
 import { ID_PATTERN, parseChoreId, parseEventId, type ChoreRef } from "./ids.js";
 import { hourFromRrule } from "./rrule.js";
-import { LIST_ITEM_STATUS, LIST_KINDS, kindFromLinked, slotFromHour, slotFromStartTime, type ListKind, type ProfileKind, type RoutineSlot } from "./vocab.js";
+import { ALL_PHOTOS, ALL_PHOTOS_ALBUM_ID, LIST_ITEM_STATUS, LIST_KINDS, RECIPE_HEADINGS, featureName, kindFromLinked, slotFromHour, slotFromStartTime, type ListKind, type ProfileKind, type RoutineSlot } from "./vocab.js";
 
 export interface Profile { id: string; name: string; color: string | null; kind: ProfileKind | null; onChoreChart: boolean | null }
 export interface Chore {
@@ -208,4 +208,266 @@ export function mapEvent(resource: unknown): CalendarEvent | null {
 
 export function mapEvents(json: unknown): CalendarEvent[] {
   return dataArray(json).map(mapEvent).filter((e): e is CalendarEvent => e !== null);
+}
+
+// ---- Phase 3: meals, recipes, photos, albums, devices, frame, sharing, account. These mappers deliberately drop every secret and URL.
+
+export interface MealCategory { id: string; name: string; color: string | null; enabled: boolean; position: number | null }
+export interface Recipe {
+  id: string; title: string; categoryId: string | null; categoryName: string | null; description: string | null; source: string | null;
+  /** Lines under "Ingredients:" (null when the description has no such section). */
+  ingredients: string[] | null;
+  /** Lines under "Instructions:" with their numbering removed (null when there is no such section). */
+  instructions: string[] | null;
+}
+export interface MealSitting {
+  id: string; title: string | null; description: string | null; note: string | null; recurring: boolean; recurrenceRule: string | null;
+  /** Every date this row covers (YYYY-MM-DD). */
+  instances: string[]; categoryId: string | null; recipeId: string | null;
+}
+/** One planned meal on one date. */
+export interface MealRow {
+  mealId: string; date: string; category: { id: string; name: string | null } | null; title: string | null; recipeId: string | null;
+  note: string | null; recurring: boolean; recurrenceRule: string | null;
+}
+export interface Album { id: string; title: string; photoCount: number | null; videoCount: number | null; editable: boolean | null }
+export interface Photo { id: string; type: string | null; createdAt: string | null; caption: string | null; from: string | null; commentsCount: number | null }
+export interface PhotoPage { page: number; pages: number; photos: Photo[] }
+export interface Device {
+  id: string; name: string; timezone: string | null; brightness: number | null; sleepsAt: string | null; wakesAt: string | null;
+  sleeping: boolean | null; sleepModeOn: boolean | null; showCaption: boolean | null; showHeart: boolean | null; blurEffect: boolean | null;
+  slideshowSpeed: number | null; slideshowStyle: number | null; startSound: boolean | null;
+  /** "all" when the slideshow plays every photo, else the album id. */
+  currentAlbumId: string | null;
+}
+export interface Frame {
+  id: string; name: string | null; timezone: string | null; householdName: string | null; locale: string | null;
+  photosOpenToPublic: boolean | null; photoViewability: string | null; features: Record<string, boolean>; plus: boolean | null;
+}
+export interface FrameUser { userId: string; email: string | null; status: string | null; owner: boolean }
+export interface PlusSubscription { status: string | null; cadence: string | null; type: string | null }
+
+export function mapMealCategory(resource: unknown): MealCategory | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const name = str(a.label);
+  if (!id || !name) return null;
+  return { id, name, color: str(a.color), enabled: bool(a.enabled) ?? true, position: num(a.position) };
+}
+
+export function mapMealCategories(json: unknown): MealCategory[] {
+  return dataArray(json).map(mapMealCategory).filter((c): c is MealCategory => c !== null);
+}
+
+const RECIPE_HEADING = /^[A-Za-z][A-Za-z ]*:$/;
+const NUMBERING = /^\d+[.)]\s*/;
+
+/** Split a recipe description written in the app's convention ("Ingredients:\n- a\n\nInstructions:\n1. x\n") into its two lists. */
+export function parseRecipeDescription(description: string | null): { ingredients: string[] | null; instructions: string[] | null } {
+  let ingredients: string[] | null = null;
+  let instructions: string[] | null = null;
+  let section: "ingredients" | "instructions" | "other" | null = null;
+  for (const raw of (description ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === "") continue;
+    if (RECIPE_HEADING.test(line)) {
+      const heading = line.toLowerCase();
+      if (heading === RECIPE_HEADINGS.ingredients.toLowerCase()) { section = "ingredients"; ingredients ??= []; }
+      else if (heading === RECIPE_HEADINGS.instructions.toLowerCase()) { section = "instructions"; instructions ??= []; }
+      else section = "other";
+      continue;
+    }
+    if (section === "ingredients" && ingredients !== null) {
+      if (line.startsWith("- ")) { const item = line.slice(2).trim(); if (item !== "") ingredients.push(item); }
+    } else if (section === "instructions" && instructions !== null) {
+      const step = line.replace(NUMBERING, "").trim();
+      if (step !== "") instructions.push(step);
+    }
+  }
+  return { ingredients, instructions };
+}
+
+function includedNames(json: unknown, type: string): Map<string, string> {
+  const included = rec(json).included;
+  const out = new Map<string, string>();
+  if (Array.isArray(included)) for (const item of included) {
+    const r = rec(item);
+    const id = idOf(r.id);
+    const label = str(rec(r.attributes).label);
+    if (id && label && r.type === type) out.set(id, label);
+  }
+  return out;
+}
+
+export function mapRecipe(resource: unknown, names: ReadonlyMap<string, string> = new Map()): Recipe | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const title = str(a.summary);
+  if (!id || title === null) return null;
+  const categoryId = idOf(rec(rec(rec(r.relationships).meal_category).data).id);
+  const description = str(a.description);
+  return { id, title, categoryId, categoryName: categoryId === null ? null : names.get(categoryId) ?? null, description, source: str(a.source), ...parseRecipeDescription(description) };
+}
+
+export function mapRecipes(json: unknown): Recipe[] {
+  const names = includedNames(json, "meal_category");
+  return dataArray(json).map((r) => mapRecipe(r, names)).filter((r): r is Recipe => r !== null);
+}
+
+/** `{ data: recipe }` (get, create, update). */
+export function mapRecipeResponse(json: unknown): Recipe | null {
+  return mapRecipe(rec(json).data, includedNames(json, "meal_category"));
+}
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function mapSitting(resource: unknown): MealSitting | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  if (!id) return null;
+  const rule = str(a.rrule);
+  const rels = rec(r.relationships);
+  return {
+    id, title: str(a.summary), description: str(a.description), note: str(a.note),
+    recurring: bool(a.recurring) ?? rule !== null, recurrenceRule: rule,
+    instances: Array.isArray(a.instances) ? a.instances.filter((d): d is string => typeof d === "string" && DATE.test(d)) : [],
+    categoryId: idOf(rec(rec(rels.meal_category).data).id), recipeId: idOf(rec(rec(rels.meal_recipe).data).id),
+  };
+}
+
+export function mapSittings(json: unknown): MealSitting[] {
+  return dataArray(json).map(mapSitting).filter((s): s is MealSitting => s !== null);
+}
+
+/** One row per date, sorted by date, then the category's position (unknown categories last), then title and id. `window` drops dates outside it. */
+export function explodeSittings(sittings: readonly MealSitting[], categories: readonly MealCategory[], window: { after?: string; before?: string } = {}): MealRow[] {
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const rows: Array<MealRow & { position: number }> = [];
+  for (const s of sittings) {
+    const category = s.categoryId === null ? null : byId.get(s.categoryId) ?? null;
+    for (const date of s.instances) {
+      if ((window.after !== undefined && date < window.after) || (window.before !== undefined && date > window.before)) continue;
+      rows.push({
+        mealId: s.id, date, category: s.categoryId === null ? null : { id: s.categoryId, name: category?.name ?? null }, title: s.title, recipeId: s.recipeId,
+        note: s.note, recurring: s.recurring, recurrenceRule: s.recurrenceRule, position: category?.position ?? Infinity,
+      });
+    }
+  }
+  const text = (x: string | null): string => x ?? "";
+  rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || (a.position === b.position ? 0 : a.position < b.position ? -1 : 1)
+    || (text(a.title) < text(b.title) ? -1 : text(a.title) > text(b.title) ? 1 : 0) || (a.mealId < b.mealId ? -1 : a.mealId > b.mealId ? 1 : 0));
+  return rows.map(({ position: _position, ...row }) => row);
+}
+
+export function mapAlbum(resource: unknown): Album | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const title = str(a.title);
+  if (!id || title === null) return null;
+  return { id, title, photoCount: num(a.photos_count), videoCount: num(a.videos_count), editable: bool(a.editable) };
+}
+
+export function mapAlbums(json: unknown): Album[] {
+  return dataArray(json).map(mapAlbum).filter((a): a is Album => a !== null);
+}
+
+/** A photo or video ("message"). The asset and thumbnail URLs, storage keys and owner ids are never read. */
+export function mapPhoto(resource: unknown): Photo | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  if (!id) return null;
+  return { id, type: str(a.asset_type), createdAt: str(a.created_at), caption: str(a.caption), from: str(a.from_email), commentsCount: num(a.comments_count) };
+}
+
+export function mapPhotoPage(json: unknown, requestedPage: number): PhotoPage {
+  const meta = rec(rec(json).meta);
+  return { page: num(meta.current_page) ?? requestedPage, pages: num(meta.num_pages) ?? 1, photos: dataArray(json).map(mapPhoto).filter((p): p is Photo => p !== null) };
+}
+
+export function mapDevice(resource: unknown): Device | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  const name = str(a.name);
+  if (!id || name === null) return null;
+  const album = num(a.current_album_id);
+  return {
+    id, name, timezone: str(a.timezone), brightness: num(a.brightness), sleepsAt: str(a.sleeps_at), wakesAt: str(a.wakes_at),
+    sleeping: bool(a.currently_sleeping), sleepModeOn: bool(a.sleep_mode_on), showCaption: bool(a.show_caption), showHeart: bool(a.show_heart), blurEffect: bool(a.blur_effect),
+    slideshowSpeed: num(a.slideshow_speed), slideshowStyle: num(a.slideshow_style), startSound: bool(a.start_sound),
+    currentAlbumId: album === null ? null : album === ALL_PHOTOS_ALBUM_ID ? ALL_PHOTOS : String(album),
+  };
+}
+
+export function mapDevices(json: unknown): Device[] {
+  return dataArray(json).map(mapDevice).filter((d): d is Device => d !== null);
+}
+
+/** The frame without share_token, notification_email, owner_name/birthday, hardware model or gift fields. */
+export function mapFrame(resource: unknown): Frame | null {
+  const r = rec(resource);
+  const id = idOf(r.id);
+  const a = rec(r.attributes);
+  if (!id) return null;
+  const features: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(rec(a.feature_bundle))) {
+    const enabled = bool(rec(value).enabled);
+    if (enabled !== null) features[featureName(key)] = enabled;
+  }
+  return {
+    id, name: str(a.name), timezone: str(a.timezone), householdName: str(a.household_name), locale: str(a.locale),
+    photosOpenToPublic: bool(a.open_to_public), photoViewability: str(a.message_viewability), features, plus: bool(a.plus),
+  };
+}
+
+/** Frame sharing rows: the `user` relationship id is the id the block and approve endpoints take. */
+export function mapFrameUsers(json: unknown): FrameUser[] {
+  const emails = new Map<string, string>();
+  const included = rec(json).included;
+  if (Array.isArray(included)) for (const item of included) {
+    const u = rec(item);
+    const id = idOf(u.id);
+    const email = str(rec(u.attributes).email);
+    if (id && email) emails.set(id, email);
+  }
+  const out: FrameUser[] = [];
+  for (const row of dataArray(json)) {
+    const userId = idOf(rec(rec(rec(row.relationships).user).data).id);
+    if (!userId) continue;
+    const a = rec(row.attributes);
+    out.push({ userId, email: emails.get(userId) ?? null, status: str(a.status), owner: bool(a.is_owner) ?? false });
+  }
+  return out;
+}
+
+/** GET /api/user: only the plan and the marketing flag. Email, phone, birthday, name and the rest are never read. */
+export function mapAccount(json: unknown): { plan: string | null; marketingEmails: boolean | null } {
+  const a = rec(rec(rec(json).data).attributes);
+  return { plan: str(a.subscription_status), marketingEmails: bool(a.agreed_to_marketing) };
+}
+
+/** GET /api/plus_access: `{ data: { subscriptions: [{ attributes: { plus_type, status, ... } }], shares } }`. Payment tokens and ids are not read. */
+export function mapPlusSubscriptions(json: unknown): PlusSubscription[] {
+  const subs = rec(rec(json).data).subscriptions;
+  if (!Array.isArray(subs)) return [];
+  return subs.map((s) => {
+    const a = rec(rec(s).attributes);
+    return { status: str(a.status), cadence: str(a.cadence), type: str(a.plus_type) };
+  });
+}
+
+/** The family's default grocery list (lists[].attributes.default_grocery_list), where Skylight puts a recipe's ingredients. */
+export function mapDefaultGroceryList(json: unknown): { id: string; title: string } | null {
+  for (const l of dataArray(json)) {
+    if (bool(rec(l.attributes).default_grocery_list) !== true) continue;
+    const id = idOf(l.id);
+    const title = str(rec(l.attributes).label);
+    if (id && title !== null) return { id, title };
+  }
+  return null;
 }

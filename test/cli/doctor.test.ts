@@ -97,3 +97,16 @@ test("doctor puts SKYLIGHT_TIMEZONE in the Claude Desktop config only when it wa
   assert.match(out, /"SKYLIGHT_TIMEZONE": "America\/Chicago"/);
   await cleanup();
 });
+
+test("doctor lists the enabled toolsets and puts SKYLIGHT_TOOLSETS in the config block only when it was set", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const { fetch } = createMockFetch([]);
+  const all = await doctor(createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir }, fetch, runner }), { serverPath: "/abs/dist/server.js" });
+  assert.match(all, /Toolsets:\s+all \(set SKYLIGHT_TOOLSETS/);
+  assert.ok(!all.includes("SKYLIGHT_TOOLSETS\":"), "the default is not written into the config block");
+  const some = await doctor(createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir, SKYLIGHT_TOOLSETS: "chores, Lists" }, fetch, runner }), { serverPath: "/abs/dist/server.js" });
+  assert.match(some, /Toolsets:\s+chores, lists \(/);
+  assert.match(some, /"SKYLIGHT_TOOLSETS": "chores,lists"/);
+  await cleanup();
+});
