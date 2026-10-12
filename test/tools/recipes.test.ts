@@ -111,7 +111,7 @@ test("delete recipe previews the planned meals that use it (next 60 days) and wr
   assert.match(d.message, /3 planned meals/);
   assert.match(d.message, /NOT be deleted/i);
   const q = t.calls.find((c) => c.url.pathname === `${MEALS}/sittings`)!.url.searchParams;
-  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-12", "2026-12-11"]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-12", "2026-12-12"]);
   const also = await t.callTool("skylight_delete_recipe", { recipeId: "900", alsoDeletePlannedMeals: true });
   assert.match((also.data as { message: string }).message, /ALSO be deleted/);
   assert.equal((also.data as { wouldDelete: { alsoDeletePlannedMeals: boolean } }).wouldDelete.alsoDeletePlannedMeals, true);
@@ -174,5 +174,18 @@ test("recipe tools are annotated: read, create, update, destroy, mutate (twice a
   assert.match(tools.get("skylight_delete_recipe")!.description ?? "", /confirm: true/);
   assert.deepEqual([a("skylight_add_recipe_to_grocery_list").destructiveHint, a("skylight_add_recipe_to_grocery_list").idempotentHint], [true, false]);
   assert.match(tools.get("skylight_add_recipe_to_grocery_list")!.description ?? "", /twice/);
+  await t.close();
+});
+
+test("date_max is exclusive: the recipe delete preview counts a meal planned on the very last day of the 60-day window", async () => {
+  // Skylight returns an instance only when date_min <= date < date_max; 2026-10-12 + 60 days is 2026-12-11.
+  const lastDay = "2026-12-11";
+  const server: MockRoute = {
+    method: "GET", path: `${MEALS}/sittings`,
+    handler: ({ url }) => ({ json: { data: [sitting("1", "900", [lastDay]), sitting("2", "900", ["2026-12-12"])].map((s) => ({ ...s, attributes: { ...s.attributes, instances: s.attributes.instances.filter((d) => d >= url.searchParams.get("date_min")! && d < url.searchParams.get("date_max")!) } })).filter((s) => s.attributes.instances.length > 0) } }),
+  };
+  const t = await connectTestClient([FRAMES, CATEGORIES, DELETE_ROUTES[2]!, server], { now: NOW });
+  const r = await t.callTool("skylight_delete_recipe", { recipeId: "900" });
+  assert.equal((r.data as { wouldDelete: { plannedMeals: number } }).wouldDelete.plannedMeals, 1, "the meal on day 60 counts; the one on day 61 does not");
   await t.close();
 });

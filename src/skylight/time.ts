@@ -42,6 +42,14 @@ export function addDays(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
+/**
+ * The `date_max` to send for an inclusive last day. Skylight's date_max is EXCLUSIVE (verified live 2026-10-12 for /meals/sittings and
+ * /calendar_events: date_min = date_max returns nothing, date_max = the next day returns that day), while the tools take inclusive `before` dates.
+ */
+export function exclusiveDateMax(inclusiveBefore: string): string {
+  return addDays(inclusiveBefore, 1);
+}
+
 /** UTC offset in minutes (east positive) that `tz` has at the instant `utcMs`. */
 export function offsetMinutesAt(utcMs: number, tz: string): number {
   const name = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(new Date(utcMs)).find((p) => p.type === "timeZoneName")?.value ?? "GMT";

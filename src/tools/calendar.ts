@@ -4,7 +4,7 @@ import { buildEventCreateBody, buildEventUpdateBody, MAX_EVENT_INVITEES, MAX_EVE
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertId, parseEventId, type EventRef } from "../skylight/ids.js";
 import { mapEvent, mapEvents, type CalendarEvent } from "../skylight/types.js";
-import { addDays, formatHuman, formatHumanTime, formatOffsetDateTime, parseInstant, todayIn, zoneLabel } from "../skylight/time.js";
+import { addDays, exclusiveDateMax, formatHuman, formatHumanTime, formatOffsetDateTime, parseInstant, todayIn, zoneLabel } from "../skylight/time.js";
 import { EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, OWN_EVENT_SOURCE } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { recurrenceShape } from "./chores.js";
@@ -42,7 +42,7 @@ async function lookupEvent(ctx: ToolContext, frameId: string, ref: EventRef, id:
     after = addDays(today, -LOOKUP_DAYS); before = addDays(today, LOOKUP_DAYS);
   }
   try {
-    const events = mapEvents(await ctx.client.request({ method: "GET", path: eventsPath(frameId), query: { date_min: after, date_max: before } }));
+    const events = mapEvents(await ctx.client.request({ method: "GET", path: eventsPath(frameId), query: { date_min: after, date_max: exclusiveDateMax(before) } }));
     return events.find((e) => e.id === id) ?? events.find((e) => e.masterId === ref.masterId) ?? null;
   } catch (e) {
     if (e instanceof SkylightApiError) throw new ValidationError("eventId", "could not verify whether this event comes from a synced calendar; try again");
@@ -143,7 +143,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       if (Date.parse(`${before}T00:00:00Z`) - Date.parse(`${after}T00:00:00Z`) > MAX_EVENT_SPAN_DAYS * 86_400_000) throw new ValidationError("before", `must be within ${MAX_EVENT_SPAN_DAYS} days of after`);
       const profileId = args.profileId === undefined ? null : assertId(args.profileId, "profileId");
       const frameId = await ctx.frames.resolve();
-      const events = mapEvents(await ctx.client.request({ method: "GET", path: eventsPath(frameId), query: { date_min: after, date_max: before } }));
+      const events = mapEvents(await ctx.client.request({ method: "GET", path: eventsPath(frameId), query: { date_min: after, date_max: exclusiveDateMax(before) } }));
       return events.filter((e) => profileId === null || e.profileIds.includes(profileId)).sort(byStart).map((e) => presentEvent(e, tz));
     })
   );

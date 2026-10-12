@@ -3,7 +3,7 @@
 // read-backs and cleanup. Every created object carries the PREFIX (grocery items come from the recipe's `zzsmoke` ingredients); cleanup happens in
 // `finally`, followed by leftover checks. It NEVER calls reset/remove device, delete photos, invite, block, or the marketing write.
 import type { Runtime } from "../src/runtime.js";
-import { addDays } from "../src/skylight/time.js";
+import { addDays, exclusiveDateMax } from "../src/skylight/time.js";
 import { mapAlbums, mapDefaultGroceryList, mapListItems, mapRecipes, mapSittings } from "../src/skylight/types.js";
 import { connectTools, ok, PREFIX } from "./live-smoke-phase2.js";
 
@@ -212,7 +212,7 @@ export async function phase3Smoke(rt: Runtime, frameId: string, today: string): 
       leftovers.groceryItems = (await smokeGroceryItems()).length;
     } catch (e) { console.error("grocery cleanup failed:", e instanceof Error ? e.message : e); leftovers.groceryItems = -1; }
     try {
-      const sittings = mapSittings(await get("/meals/sittings", { date_min: today, date_max: day(12), include: "meal_category,meal_recipe" }))
+      const sittings = mapSittings(await get("/meals/sittings", { date_min: today, date_max: exclusiveDateMax(day(12)), include: "meal_category,meal_recipe" }))
         .filter((s) => (s.title ?? "").startsWith(PREFIX) || (s.recipeId !== null && recipeIds.has(s.recipeId)));
       for (const s of sittings) {
         const date = s.instances[0];

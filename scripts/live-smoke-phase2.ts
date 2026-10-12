@@ -1,7 +1,7 @@
 // Phase 2 live write checks: rewards, routine reordering, lists and calendar events. Called from live-smoke.ts when SKYLIGHT_LIVE_WRITE=1.
 // Everything runs through the real MCP tools (in-memory client) where that is the behavior under test, and through raw requests for read-backs.
 // Every created object carries the PREFIX; cleanup happens in `finally`, followed by leftover checks for rewards, lists and events.
-import { addDays, toOffsetDateTime } from "../src/skylight/time.js";
+import { addDays, exclusiveDateMax, toOffsetDateTime } from "../src/skylight/time.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createRuntime, type Runtime } from "../src/runtime.js";
@@ -192,7 +192,7 @@ export async function phase2Smoke(rt: Runtime, frameId: string, today: string): 
     const bare = ok(await call("skylight_create_event", { title: `${PREFIX} bare ${stamp}`, profileIds: [profileId], startsAt: `${day1}T18:30` }), "create event from a bare time") as { events: Array<{ id: string; when: string | null }> };
     const bareEvent = bare.events[0];
     if (!bareEvent || !bareEvent.when?.includes("6:30 PM")) throw new Error(`bare-time event 'when' does not say 6:30 PM: ${JSON.stringify(bareEvent)}`);
-    const rawRows = (await get<{ data?: Array<{ id: string; attributes?: { starts_at?: string } }> }>("/calendar_events", { date_min: addDays(day1, -1), date_max: addDays(day1, 2) })).data ?? [];
+    const rawRows = (await get<{ data?: Array<{ id: string; attributes?: { starts_at?: string } }> }>("/calendar_events", { date_min: addDays(day1, -1), date_max: exclusiveDateMax(addDays(day1, 2)) })).data ?? [];
     const rawStart = rawRows.find((r) => r.id === bareEvent.id)?.attributes?.starts_at ?? "";
     // The list endpoint echoes UTC; compare instants, not strings. 18:30 Eastern is 22:30Z (EDT) or 23:30Z (EST).
     const wantInstant = Date.parse(toOffsetDateTime(`${day1}T18:30`, "America/New_York", "startsAt"));

@@ -4,7 +4,7 @@ import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertNumericId } from "../skylight/ids.js";
 import { buildMealCategoryUpdateBody, MAX_MEAL_CATEGORY_NAME_LENGTH, MAX_MEAL_DESCRIPTION_LENGTH, MAX_MEAL_NOTE_LENGTH, MAX_MEAL_TITLE_LENGTH, prepareMealCreate, prepareMealUpdate, type MealPlanInput } from "../skylight/meal-payload.js";
 import { explodeSittings, mapMealCategories, mapMealCategory, mapSitting, mapSittings, type MealCategory, type MealSitting } from "../skylight/types.js";
-import { addDays, formatHuman, todayIn } from "../skylight/time.js";
+import { addDays, exclusiveDateMax, formatHuman, todayIn } from "../skylight/time.js";
 import { EXPOSED_MEAL_APPLY_TO_VALUES, MEAL_SCOPE_TEXT, type MealScope } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { recurrenceShape } from "./chores.js";
@@ -32,9 +32,9 @@ export async function resolveMealCategory(ctx: ToolContext, frameId: string, val
   return hit;
 }
 
-/** Meal-plan rows (sittings) with at least one date in after..before. */
+/** Meal-plan rows (sittings) with at least one date in after..before, both inclusive (Skylight's own date_max is exclusive; exclusiveDateMax converts). */
 export async function readSittings(ctx: ToolContext, frameId: string, after: string, before: string): Promise<MealSitting[]> {
-  return mapSittings(await ctx.client.request({ method: "GET", path: sittingsPath(frameId), query: { date_min: after, date_max: before, include: SITTING_INCLUDE } }));
+  return mapSittings(await ctx.client.request({ method: "GET", path: sittingsPath(frameId), query: { date_min: after, date_max: exclusiveDateMax(before), include: SITTING_INCLUDE } }));
 }
 
 /** `{ data: [sitting...] }` or `{ data: sitting }`. */
@@ -156,7 +156,7 @@ export function registerMealTools(server: McpServer, ctx: ToolContext): void {
       const categories = await listMealCategories(ctx, frameId);
       const slot = await resolveMealCategory(ctx, frameId, category, categories);
       const body = finish(slot.id);
-      const json = await ctx.client.request<unknown>({ method: "POST", path: sittingsPath(frameId), query: { date_min: body.date, date_max: body.date, include: SITTING_INCLUDE }, body });
+      const json = await ctx.client.request<unknown>({ method: "POST", path: sittingsPath(frameId), query: { date_min: body.date, date_max: exclusiveDateMax(body.date), include: SITTING_INCLUDE }, body });
       const meals = explodeSittings(sittingsFrom(json), categories);
       return { created: meals.length, meals, ...(meals.length === 0 ? { warning: "Skylight returned no meal; call skylight_list_meals to confirm before retrying." } : {}) };
     })
@@ -192,7 +192,7 @@ export function registerMealTools(server: McpServer, ctx: ToolContext): void {
       try {
         await ctx.client.request({
           method: "PATCH", path: `${sittingsPath(frameId)}/${id}/instances/${date}`,
-          query: { date_min: date, date_max: date, include: SITTING_INCLUDE, ...(applyTo !== undefined ? { apply_to: applyTo } : {}) }, body,
+          query: { date_min: date, date_max: exclusiveDateMax(date), include: SITTING_INCLUDE, ...(applyTo !== undefined ? { apply_to: applyTo } : {}) }, body,
         });
       } catch (e) {
         throw mapScopeError(e);

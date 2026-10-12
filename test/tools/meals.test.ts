@@ -49,7 +49,7 @@ test("list meals sends date_min/date_max/include and returns one row per date, s
   const t = await connectTestClient([FRAMES, CATEGORIES, SITTINGS]);
   const r = await t.callTool("skylight_list_meals", { after: "2026-10-13", before: "2026-10-15" });
   const q = t.calls.find((c) => c.url.pathname === `${MEALS}/sittings`)!.url.searchParams;
-  assert.deepEqual([q.get("date_min"), q.get("date_max"), q.get("include")], ["2026-10-13", "2026-10-15", INCLUDE]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max"), q.get("include")], ["2026-10-13", "2026-10-16", INCLUDE]);
   const rows = r.data as Array<{ mealId: string; date: string; category: { name: string }; title: string }>;
   assert.deepEqual(rows.map((x) => [x.date, x.mealId, x.title, x.category.name]), [
     ["2026-10-13", "1002", "Cereal", "Breakfast"], ["2026-10-13", "1001", "Pasta night", "Dinner"], ["2026-10-14", "1002", "Cereal", "Breakfast"], ["2026-10-15", "1002", "Cereal", "Breakfast"],
@@ -63,7 +63,7 @@ test("list meals defaults to today through 7 days ahead in the configured zone, 
   const t = await connectTestClient([FRAMES, CATEGORIES, SITTINGS], { now: NOW });
   await t.callTool("skylight_list_meals");
   const q = t.calls.find((c) => c.url.pathname === `${MEALS}/sittings`)!.url.searchParams;
-  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-12", "2026-10-19"]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-12", "2026-10-20"]);
   const before = t.calls.length;
   assert.equal((await t.callTool("skylight_list_meals", { after: "2026-10-01", before: "2026-12-04" })).isError, true);
   assert.equal((await t.callTool("skylight_list_meals", { after: "2026-10-05", before: "2026-10-01" })).isError, true);
@@ -81,7 +81,7 @@ test("plan meal POSTs the verified body with date_min/date_max/include, and retu
   assert.equal(r.isError, false);
   const [post] = writes(t);
   assert.equal(post!.url.pathname, `${MEALS}/sittings`);
-  assert.deepEqual([post!.url.searchParams.get("date_min"), post!.url.searchParams.get("date_max"), post!.url.searchParams.get("include")], ["2026-10-13", "2026-10-13", INCLUDE]);
+  assert.deepEqual([post!.url.searchParams.get("date_min"), post!.url.searchParams.get("date_max"), post!.url.searchParams.get("include")], ["2026-10-13", "2026-10-14", INCLUDE]);
   assert.deepEqual(post!.body, { meal_category_id: "6859336", add_to_grocery_list: false, summary: "Taco night", date: "2026-10-13" });
   const d = r.data as { created: number; meals: Array<{ mealId: string; date: string; title: string; category: { name: string } }> };
   assert.equal(d.created, 1);
@@ -133,7 +133,7 @@ test("update meal on a one-time meal PATCHes the instance path with no apply_to,
   assert.equal(patch!.method, "PATCH");
   assert.equal(patch!.url.pathname, `${MEALS}/sittings/1001/instances/2026-10-13`);
   assert.equal(patch!.url.searchParams.get("apply_to"), null);
-  assert.deepEqual([patch!.url.searchParams.get("date_min"), patch!.url.searchParams.get("date_max"), patch!.url.searchParams.get("include")], ["2026-10-13", "2026-10-13", INCLUDE]);
+  assert.deepEqual([patch!.url.searchParams.get("date_min"), patch!.url.searchParams.get("date_max"), patch!.url.searchParams.get("include")], ["2026-10-13", "2026-10-14", INCLUDE]);
   assert.deepEqual(patch!.body, { note: "New note", meal_category_id: "6859335" });
   const d = r.data as { updated: boolean; meals: Array<{ mealId: string }> };
   assert.equal(d.updated, true);
@@ -255,5 +255,64 @@ test("meal tools are annotated: read, update, create, destroy", async () => {
   assert.deepEqual([a("skylight_delete_meal").destructiveHint, a("skylight_delete_meal").idempotentHint], [true, false]);
   assert.match(tools.get("skylight_delete_meal")!.description ?? "", /confirm: true/);
   assert.match(tools.get("skylight_plan_meal")!.description ?? "", /grocery/i);
+  await t.close();
+});
+
+// ---- Skylight's date_max is EXCLUSIVE (verified live 2026-10-12): an instance is returned only when date_min <= date < date_max.
+const inWindow = (url: URL, dates: string[]): string[] => dates.filter((d) => d >= url.searchParams.get("date_min")! && d < url.searchParams.get("date_max")!);
+type Sitting = { id: string; attributes: Record<string, unknown> } & Record<string, unknown>;
+const exclusiveGet = (all: Sitting[]): MockRoute => ({
+  method: "GET", path: `${MEALS}/sittings`,
+  handler: ({ url }) => ({ json: { data: all.map((s) => ({ ...s, attributes: { ...s.attributes, instances: inWindow(url, s.attributes.instances as string[]) } })).filter((s) => (s.attributes.instances as string[]).length > 0) } }),
+});
+const baseSittings = (fixture("meal_sittings") as { data: Sitting[] }).data;
+const on = (id: string, title: string, instances: string[], over: Record<string, unknown> = {}): Sitting => ({ ...created(id, { summary: title, instances, ...over }) } as Sitting);
+
+test("date_max is exclusive: list meals sends the day after the inclusive end, so a one-day window returns that day", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, exclusiveGet(baseSittings)]);
+  const r = await t.callTool("skylight_list_meals", { after: "2026-10-14", before: "2026-10-14" });
+  const q = t.calls.find((c) => c.url.pathname === `${MEALS}/sittings`)!.url.searchParams;
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-14", "2026-10-15"]);
+  assert.deepEqual((r.data as Array<{ mealId: string; date: string }>).map((m) => [m.mealId, m.date]), [["1002", "2026-10-14"]]);
+  await t.close();
+});
+
+test("date_max is exclusive: a window ending on the last day of the year sends January 1st", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, exclusiveGet([on("7", "New Year's Eve", ["2026-12-31"])])]);
+  const r = await t.callTool("skylight_list_meals", { after: "2026-12-25", before: "2026-12-31" });
+  assert.equal(t.calls.find((c) => c.url.pathname === `${MEALS}/sittings`)!.url.searchParams.get("date_max"), "2027-01-01");
+  assert.deepEqual((r.data as Array<{ date: string }>).map((m) => m.date), ["2026-12-31"]);
+  await t.close();
+});
+
+test("date_max is exclusive: plan meal asks for date..date+1 and so maps the created meal to one row, not none", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: `${MEALS}/sittings`, handler: ({ url, body }) => ({ json: { data: [on("5001", "Taco night", inWindow(url, [(body as { date: string }).date]))] } }) }]);
+  const r = await t.callTool("skylight_plan_meal", { date: "2026-10-13", category: "dinner", title: "Taco night" });
+  assert.equal(r.isError, false);
+  const d = r.data as { created: number; meals: Array<{ mealId: string; date: string }>; warning?: string };
+  assert.equal(d.created, 1);
+  assert.deepEqual(d.meals.map((m) => [m.mealId, m.date]), [["5001", "2026-10-13"]]);
+  assert.equal(d.warning, undefined);
+  // across the year boundary
+  const y = await t.callTool("skylight_plan_meal", { date: "2026-12-31", category: "dinner", title: "Taco night" });
+  assert.equal(writes(t)[1]!.url.searchParams.get("date_max"), "2027-01-01");
+  assert.deepEqual((y.data as { meals: Array<{ date: string }> }).meals.map((m) => m.date), ["2026-12-31"]);
+  await t.close();
+});
+
+test("date_max is exclusive: update and delete find the meal with a date..date+1 lookup, and update re-reads the same way", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, exclusiveGet([on("9", "Eve", ["2026-12-31"])]), { method: "PATCH", path: /sittings/, json: {} }, { method: "DELETE", path: /sittings/, json: {} }]);
+  const upd = await t.callTool("skylight_update_meal", { mealId: "9", date: "2026-12-31", note: "x" });
+  assert.equal(upd.isError, false, upd.text);
+  assert.deepEqual((upd.data as { meals: Array<{ mealId: string }> }).meals.map((m) => m.mealId), ["9"]);
+  const patch = writes(t)[0]!;
+  assert.deepEqual([patch.url.searchParams.get("date_min"), patch.url.searchParams.get("date_max")], ["2026-12-31", "2027-01-01"]);
+  const sittingGets = t.calls.filter((c) => c.method === "GET" && c.url.pathname === `${MEALS}/sittings`);
+  assert.equal(sittingGets.length, 2, "one lookup before the PATCH, one re-read after");
+  for (const g of sittingGets) assert.deepEqual([g.url.searchParams.get("date_min"), g.url.searchParams.get("date_max")], ["2026-12-31", "2027-01-01"]);
+  const preview = await t.callTool("skylight_delete_meal", { mealId: "9", date: "2026-12-31" });
+  assert.equal((preview.data as { confirmed: boolean }).confirmed, false);
+  const del = await t.callTool("skylight_delete_meal", { mealId: "9", date: "2026-12-31", confirm: true });
+  assert.equal(del.isError, false, del.text);
   await t.close();
 });

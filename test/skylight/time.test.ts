@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, formatHuman, formatOffsetDateTime, offsetMinutesAt, parseInstant, todayIn, toOffsetDateTime } from "../../src/skylight/time.js";
+import { addDays, exclusiveDateMax, formatHuman, formatOffsetDateTime, offsetMinutesAt, parseInstant, todayIn, toOffsetDateTime } from "../../src/skylight/time.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 const NY = "America/New_York";
@@ -127,4 +127,13 @@ test("an ambiguous fall-back hour resolves to the first (daylight) occurrence, i
   assert.equal(toOffsetDateTime("2026-10-25T02:59", "Europe/Berlin", "f"), "2026-10-25T02:59:00+02:00");
   assert.equal(toOffsetDateTime("2026-10-25T03:00", "Europe/Berlin", "f"), "2026-10-25T03:00:00+01:00");
   assert.equal(toOffsetDateTime("2026-04-05T02:30", "Australia/Sydney", "f"), "2026-04-05T02:30:00+11:00");
+});
+
+test("exclusiveDateMax is the day after an inclusive end date, across month, year and leap-day boundaries", () => {
+  assert.equal(exclusiveDateMax("2026-10-12"), "2026-10-13");
+  assert.equal(exclusiveDateMax("2026-10-31"), "2026-11-01");
+  assert.equal(exclusiveDateMax("2026-12-31"), "2027-01-01");
+  assert.equal(exclusiveDateMax("2027-02-28"), "2027-03-01");
+  assert.equal(exclusiveDateMax("2028-02-28"), "2028-02-29");
+  assert.equal(exclusiveDateMax("2028-02-29"), "2028-03-01");
 });

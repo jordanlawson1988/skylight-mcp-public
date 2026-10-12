@@ -23,7 +23,7 @@ test("list events passes date_min/date_max and maps the live fixture sorted by s
   assert.equal(r.isError, false);
   const q = t.calls.at(-1)!.url.searchParams;
   assert.equal(q.get("date_min"), "2026-10-08");
-  assert.equal(q.get("date_max"), "2026-10-14");
+  assert.equal(q.get("date_max"), "2026-10-15", "date_max is exclusive: the day after the inclusive before");
   const d = r.data as Array<{ id: string; masterId: string; startsAt: string; source: string; recurrenceRule: string | null }>;
   assert.deepEqual(d.map((e) => e.id), ["11019657225", "11019627806-1791803100", "13274086104"]);
   assert.equal(d[1]!.masterId, "11019627806");
@@ -67,7 +67,7 @@ test("list events defaults to today through 7 days ahead and caps the span at 92
   await t.callTool("skylight_list_events");
   const q = t.calls.at(-1)!.url.searchParams;
   const today = todayIn("America/New_York");
-  assert.deepEqual([q.get("date_min"), q.get("date_max")], [today, addDays(today, 7)]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], [today, addDays(today, 8)]);
   const n = t.calls.length;
   assert.equal((await t.callTool("skylight_list_events", { after: "2026-01-01", before: "2026-04-03" })).isError, false); // exactly 92 days
   assert.equal((await t.callTool("skylight_list_events", { after: "2026-01-01", before: "2026-04-04" })).isError, true);
@@ -211,7 +211,7 @@ test("update event PUTs the master id with only the provided fields and apply_to
   // the lookup covers a year either side of today
   const q = t.calls.find((c) => c.method === "GET" && c.url.pathname === EVENTS)!.url.searchParams;
   const today = todayIn("America/New_York");
-  assert.deepEqual([q.get("date_min"), q.get("date_max")], [addDays(today, -365), addDays(today, 365)]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], [addDays(today, -365), addDays(today, 366)]);
   assert.equal((r.data as { title: string }).title, "Dentist 2");
   await t.close();
 });
@@ -371,7 +371,7 @@ test("delete event refuses a synced-calendar event in the preview and on confirm
   assert.equal(writes(t).length, 0);
   // the window for an occurrence id is narrowed around the occurrence date
   const q = t.calls.find((c) => c.method === "GET" && c.url.pathname === EVENTS)!.url.searchParams;
-  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-11", "2026-10-13"]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-11", "2026-10-14"]);
   await t.close();
 });
 
@@ -401,10 +401,10 @@ test("'today' comes from the configured zone and the injected clock, not UTC or 
   const t = await connectTestClient([FRAMES, CATEGORIES, { method: "GET", path: EVENTS, json: { data: [] } }, { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }], { env: { SKYLIGHT_TIMEZONE: "Pacific/Auckland" }, now });
   await t.callTool("skylight_list_events");
   let q = t.calls.at(-1)!.url.searchParams;
-  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-13", "2026-10-20"]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-13", "2026-10-21"]);
   await t.callTool("skylight_update_event", { eventId: "900", title: "x" });
   q = t.calls.filter((c) => c.method === "GET" && c.url.pathname === EVENTS).at(-1)!.url.searchParams;
-  assert.deepEqual([q.get("date_min"), q.get("date_max")], [addDays("2026-10-13", -365), addDays("2026-10-13", 365)]);
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], [addDays("2026-10-13", -365), addDays("2026-10-13", 366)]);
   await t.close();
   const ny = await connectTestClient([FRAMES, { method: "GET", path: EVENTS, json: { data: [] } }], { now });
   await ny.callTool("skylight_list_events");
@@ -509,5 +509,54 @@ test("the event tools describe invitations as emailing people, while keeping the
     assert.match(description, /email/i);
     assert.equal(tools.get(name)!.annotations!.openWorldHint, false, "annotations are unchanged");
   }
+  await t.close();
+});
+
+// ---- Skylight's date_max is EXCLUSIVE (verified live 2026-10-12): GET /calendar_events with date_min = date_max returns nothing.
+const exclusiveEvents = (events: ReturnType<typeof ev>[]): MockRoute => ({
+  method: "GET", path: EVENTS,
+  handler: ({ url }) => ({ json: { data: events.filter((e) => { const day = (e.attributes.starts_at as string).slice(0, 10); return day >= url.searchParams.get("date_min")! && day < url.searchParams.get("date_max")!; }) } }),
+});
+
+test("date_max is exclusive: list events sends the day after the inclusive end, so a one-day window returns that day's events", async () => {
+  const day = ev("501", "Dentist", { starts_at: "2026-10-14T15:00:00.000Z", ends_at: "2026-10-14T16:00:00.000Z" });
+  const other = ev("502", "Elsewhere", { starts_at: "2026-10-15T15:00:00.000Z", ends_at: "2026-10-15T16:00:00.000Z" });
+  const t = await connectTestClient([FRAMES, exclusiveEvents([day, other])]);
+  const r = await t.callTool("skylight_list_events", { after: "2026-10-14", before: "2026-10-14" });
+  const q = t.calls.at(-1)!.url.searchParams;
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-10-14", "2026-10-15"]);
+  assert.deepEqual((r.data as Array<{ id: string }>).map((e) => e.id), ["501"]);
+  await t.close();
+});
+
+test("date_max is exclusive: a list window ending on December 31st sends January 1st, and the last day is included", async () => {
+  const eve = ev("503", "New Year's Eve", { starts_at: "2026-12-31T23:00:00.000Z", ends_at: "2027-01-01T00:00:00.000Z" });
+  const t = await connectTestClient([FRAMES, exclusiveEvents([eve])]);
+  const r = await t.callTool("skylight_list_events", { after: "2026-12-30", before: "2026-12-31" });
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("date_max"), "2027-01-01");
+  assert.deepEqual((r.data as Array<{ id: string }>).map((e) => e.id), ["503"]);
+  await t.close();
+});
+
+test("date_max is exclusive: the synced-source lookup for an occurrence near the end of the year asks for the day after the following day", async () => {
+  const seconds = Math.floor(Date.UTC(2026, 11, 31, 15, 0, 0) / 1000);
+  const id = `11019627806-${seconds}`;
+  const synced31 = ev(id, "Event 3", { source: "google", recurring: true, starts_at: "2026-12-31T15:00:00.000Z" });
+  const t = await connectTestClient([FRAMES, exclusiveEvents([synced31]), { method: "DELETE", path: /\/calendar_events\//, json: {} }]);
+  // The occurrence day is Dec 31, the lookup is Dec 30 .. Jan 1 inclusive, so date_max is Jan 2; the synced event is found and the delete is refused.
+  const preview = await t.callTool("skylight_delete_event", { eventId: id, applyTo: "one" });
+  assert.equal(preview.isError, true);
+  assert.match(preview.text, /synced google calendar/);
+  const q = t.calls.find((c) => c.method === "GET" && c.url.pathname === EVENTS)!.url.searchParams;
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2026-12-30", "2027-01-02"]);
+  assert.equal(writes(t).length, 0);
+  await t.close();
+});
+
+test("date_max is exclusive: the update lookup of a plain id covers a year either side of today, end exclusive", async () => {
+  const t = await connectTestClient([FRAMES, lookupRoute([]), { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }], { now: () => new Date("2026-12-31T15:00:00Z") });
+  await t.callTool("skylight_update_event", { eventId: "900", title: "x" });
+  const q = t.calls.find((c) => c.method === "GET" && c.url.pathname === EVENTS)!.url.searchParams;
+  assert.deepEqual([q.get("date_min"), q.get("date_max")], ["2025-12-31", "2028-01-01"]);
   await t.close();
 });
