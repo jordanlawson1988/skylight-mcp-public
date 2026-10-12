@@ -151,3 +151,28 @@ test("GET does not retry other errors, and writes are never retried", async () =
     assert.deepEqual(post.sleeps, []);
   }
 });
+
+test("GET retries only 429, 500, 502, 503 and 504", async () => {
+  for (const status of [429, 500, 502, 503, 504]) {
+    const h = retryHarness([{ status, text: "x" }, { status: 200, json: {} }]);
+    await h.client.request({ method: "GET", path: "/api/x" });
+    assert.equal(h.calls.length, 2, String(status));
+  }
+  for (const status of [400, 404, 422, 501, 505, 599]) {
+    const h = retryHarness([{ status, text: "x" }, { status: 200, json: {} }]);
+    await assert.rejects(h.client.request({ method: "GET", path: "/api/x" }));
+    assert.equal(h.calls.length, 1, String(status));
+  }
+});
+
+test("PUT and DELETE are never retried", async () => {
+  for (const method of ["PUT", "DELETE"] as const) {
+    let n = 0;
+    const { fetch, calls } = createMockFetch([{ method, path: "/api/x", handler: () => ({ status: n++ === 0 ? 503 : 200, text: "x" }) }]);
+    const sleeps: number[] = [];
+    const client = createClient({ fetch, config, tokens: tokens(["AT"]), sleep: async (ms) => { sleeps.push(ms); } });
+    await assert.rejects(client.request({ method, path: "/api/x", body: {} }), (e: unknown) => e instanceof SkylightApiError && e.status === 503);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(sleeps, []);
+  }
+});

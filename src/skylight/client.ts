@@ -21,6 +21,7 @@ const defaultSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve,
 
 /** Reads wait before the single retry: Retry-After seconds capped at 2s, else 500ms. */
 const RETRY_DEFAULT_MS = 500;
+const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
 const RETRY_CAP_SECONDS = 2;
 function retryDelayMs(res: Response): number {
   const raw = res.headers.get("retry-after")?.trim();
@@ -69,8 +70,8 @@ export function createClient(opts: { fetch: typeof globalThis.fetch; config: Sky
         ({ res, text } = await send(url.toString(), init, token));
         if (res.status === 401) throw new AuthError("Skylight rejected the credentials after a refresh. Run `skylight-mcp login` again.");
       }
-      // Reads are safe to repeat: retry once on rate limiting or a server error. Writes are never retried (they could duplicate).
-      if (o.method === "GET" && (res.status === 429 || res.status >= 500)) {
+      // Reads are safe to repeat: retry once on 429, 500, 502, 503 or 504. Writes are never retried (they could duplicate).
+      if (o.method === "GET" && RETRYABLE_STATUSES.has(res.status)) {
         await sleep(retryDelayMs(res));
         ({ res, text } = await send(url.toString(), init, token));
       }
