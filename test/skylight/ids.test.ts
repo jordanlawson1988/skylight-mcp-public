@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertId, assertDate, assertDateTimeWithOffset, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, assertEmoji, assertPoints, localDateString } from "../../src/skylight/ids.js";
+import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, assertEmoji, assertPoints, localDateString } from "../../src/skylight/ids.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 test("assertId accepts simple ids and numbers", () => {
@@ -89,23 +89,5 @@ test("parseEventId splits composite occurrence ids and passes master ids through
 test("parseEventId rejects anything that is not <digits> or <digits>-<digits>", () => {
   for (const bad of ["", "abc", "12-", "-12", "12-34-56", "12-ab", "../1", "1/2", "12-2026-10-12"]) {
     assert.throws(() => parseEventId(bad, "eventId"), (e: unknown) => e instanceof ValidationError && e.field === "eventId", bad);
-  }
-});
-
-test("assertDateTimeWithOffset accepts an explicit offset or Z, with or without seconds", () => {
-  for (const ok of ["2026-10-12T18:30:00-04:00", "2026-10-12T18:30:00.000-04:00", "2026-10-12T22:30:00.5Z", "2026-10-12T18:30-04:00", "2026-10-12T22:30:00Z", "2026-10-12T22:30:00+05:30"]) {
-    assert.equal(assertDateTimeWithOffset(ok, "startsAt"), ok);
-  }
-});
-
-test("assertDateTimeWithOffset explains why a bare datetime is refused", () => {
-  assert.throws(() => assertDateTimeWithOffset("2026-10-12T18:30:00", "startsAt"), (e: unknown) =>
-    e instanceof ValidationError && e.field === "startsAt" && e.message.includes("include a UTC offset, e.g. 2026-10-12T18:30:00-04:00, because Skylight reads bare times as UTC"));
-  assert.throws(() => assertDateTimeWithOffset("2026-10-12T18:30", "startsAt"), /include a UTC offset/);
-});
-
-test("assertDateTimeWithOffset rejects impossible values and other shapes", () => {
-  for (const bad of ["2026-10-12", "2026-02-30T10:00:00Z", "2026-10-12T24:00:00Z", "2026-10-12T10:60:00Z", "2026-10-12T10:00:60Z", "2026-10-12T10:00:00+25:00", "2026-10-12T10:00:00+04:60", "2026-10-12 10:00:00Z", "2026-10-12T10:00:00.Z", "2026-10-12T10:00:00.1234Z", "2026-10-12T10:00.5Z", "nope", ""]) {
-    assert.throws(() => assertDateTimeWithOffset(bad, "endsAt"), (e: unknown) => e instanceof ValidationError && e.field === "endsAt", bad);
   }
 });

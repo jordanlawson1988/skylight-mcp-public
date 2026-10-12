@@ -32,6 +32,28 @@ test("list events passes date_min/date_max and maps the live fixture sorted by s
   await t.close();
 });
 
+test("list events presents times in the configured zone with a human 'when'; all-day events keep dates", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: EVENTS, json: fixture("calendar_events") }]);
+  const d = (await t.callTool("skylight_list_events", { after: "2026-10-08", before: "2026-10-14" })).data as Array<{ id: string; startsAt: string; endsAt: string; when: string; timezone: string | null; allDay: boolean }>;
+  const by = (id: string) => d.find((e) => e.id === id)!;
+  assert.deepEqual([by("11019657225").startsAt, by("11019657225").endsAt, by("11019657225").when], ["2026-10-08", "2026-10-13", "Thu Oct 8 to Tue Oct 13"]);
+  assert.deepEqual([by("13274086104").startsAt, by("13274086104").endsAt, by("13274086104").when], ["2026-10-12T16:00:00-04:00", "2026-10-12T16:15:00-04:00", "Mon Oct 12, 4:00 PM EDT to 4:15 PM EDT"]);
+  assert.equal(by("11019627806-1791803100").startsAt, "2026-10-12T07:05:00-04:00");
+  assert.equal(by("11019627806-1791803100").timezone, "America/New_York");
+  await t.close();
+  const utc = await connectTestClient([FRAMES, { method: "GET", path: EVENTS, json: fixture("calendar_events") }], { env: { SKYLIGHT_TIMEZONE: "UTC" } });
+  const u = (await utc.callTool("skylight_list_events", { after: "2026-10-08", before: "2026-10-14" })).data as Array<{ id: string; startsAt: string }>;
+  assert.equal(u.find((e) => e.id === "13274086104")!.startsAt, "2026-10-12T20:00:00+00:00");
+  await utc.close();
+});
+
+test("single-day all-day events say just the date in 'when'", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: EVENTS, json: { data: [ev("7", "Field day", { all_day: true, starts_at: "2026-10-12T00:00:00.000Z", ends_at: "2026-10-12T00:00:00.000Z" })] } }]);
+  const d = (await t.callTool("skylight_list_events", { after: "2026-10-12", before: "2026-10-12" })).data as Array<{ startsAt: string; endsAt: string; when: string }>;
+  assert.deepEqual([d[0]!.startsAt, d[0]!.endsAt, d[0]!.when], ["2026-10-12", "2026-10-12", "Mon Oct 12"]);
+  await t.close();
+});
+
 test("list events can filter by profileId", async () => {
   const t = await connectTestClient([FRAMES, { method: "GET", path: EVENTS, json: fixture("calendar_events") }]);
   const r = await t.callTool("skylight_list_events", { after: "2026-10-08", before: "2026-10-14", profileId: "15057920" });
@@ -74,9 +96,9 @@ test("create timed event: explicit end, minute-precision input, Z offset, defaul
   const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: ev("501", "x") } }]);
   await t.callTool("skylight_create_event", { title: "A", profileIds: ["12"], startsAt: "2026-10-12T22:30Z", endsAt: "2026-10-13T00:00:00Z" });
   const body = writes(t)[0]!.body as Record<string, unknown>;
-  assert.equal(body.starts_at, "2026-10-12T22:30Z");
+  assert.equal(body.starts_at, "2026-10-12T22:30:00Z");
   assert.equal(body.ends_at, "2026-10-13T00:00:00Z");
-  assert.equal(body.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+  assert.equal(body.timezone, "America/New_York");
   assert.deepEqual([body.location, body.description, body.emoji_icon, body.countdown_enabled], [null, null, null, false]);
   await t.callTool("skylight_create_event", { title: "B", profileIds: ["12"], startsAt: "2026-10-12T23:30:00+02:00" });
   assert.equal((writes(t)[1]!.body as Record<string, unknown>).ends_at, "2026-10-13T00:30:00+02:00");
@@ -101,13 +123,32 @@ test("create event with a weekly recurrence sends rrule as a one-item array", as
   await t.close();
 });
 
-test("create event refuses a bare datetime with the offset explanation, before any request", async () => {
+test("create event reads a bare datetime as Eastern time and sends an explicit offset", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: [ev("1", "Dentist", { starts_at: "2026-10-12T22:30:00.000Z", ends_at: "2026-10-12T23:30:00.000Z" })] } }]);
+  const r = await t.callTool("skylight_create_event", { title: "Dentist", profileIds: ["12"], startsAt: "2026-10-12T18:30" });
+  assert.equal(r.isError, false);
+  const body = writes(t)[0]!.body as Record<string, unknown>;
+  assert.deepEqual([body.starts_at, body.ends_at], ["2026-10-12T18:30:00-04:00", "2026-10-12T19:30:00-04:00"]);
+  const e = (r.data as { events: Array<{ startsAt: string; endsAt: string; when: string }> }).events[0]!;
+  assert.deepEqual([e.startsAt, e.endsAt, e.when], ["2026-10-12T18:30:00-04:00", "2026-10-12T19:30:00-04:00", "Mon Oct 12, 6:30 PM EDT to 7:30 PM EDT"]);
+  await t.callTool("skylight_create_event", { title: "Winter", profileIds: ["12"], startsAt: "2026-01-12T18:30:00", endsAt: "2026-01-12T20:00" });
+  const winter = writes(t)[1]!.body as Record<string, unknown>;
+  assert.deepEqual([winter.starts_at, winter.ends_at], ["2026-01-12T18:30:00-05:00", "2026-01-12T20:00:00-05:00"]);
+  await t.close();
+  const london = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: [ev("2", "x")] } }], { env: { SKYLIGHT_TIMEZONE: "Europe/London" } });
+  await london.callTool("skylight_create_event", { title: "x", profileIds: ["12"], startsAt: "2026-07-12T18:30" });
+  assert.equal((writes(london)[0]!.body as Record<string, unknown>).starts_at, "2026-07-12T18:30:00+01:00");
+  assert.equal((writes(london)[0]!.body as Record<string, unknown>).timezone, "Europe/London");
+  await london.close();
+});
+
+test("create event rejects a datetime that is neither bare nor offset-qualified, before any request", async () => {
   const t = await connectTestClient([FRAMES, CATEGORIES, { method: "POST", path: EVENTS, json: { data: ev("1", "x") } }]);
-  const r = await t.callTool("skylight_create_event", { title: "x", profileIds: ["12"], startsAt: "2026-10-12T18:30:00" });
+  const r = await t.callTool("skylight_create_event", { title: "x", profileIds: ["12"], startsAt: "6:30 PM" });
   assert.equal(r.isError, true);
-  assert.match(r.text, /startsAt: include a UTC offset, e\.g\. 2026-10-12T18:30:00-04:00, because Skylight reads bare times as UTC/);
-  const end = await t.callTool("skylight_create_event", { title: "x", profileIds: ["12"], startsAt: "2026-10-12T18:30:00Z", endsAt: "2026-10-12T19:30:00" });
-  assert.match(end.text, /endsAt: include a UTC offset/);
+  assert.match(r.text, /startsAt: use YYYY-MM-DDTHH:mm, read as America\/New_York time, or add an explicit offset/);
+  const end = await t.callTool("skylight_create_event", { title: "x", profileIds: ["12"], startsAt: "2026-10-12T18:30:00Z", endsAt: "tomorrow" });
+  assert.match(end.text, /endsAt: use YYYY-MM-DDTHH:mm/);
   assert.equal(t.calls.length, 0);
   await t.close();
 });
@@ -214,7 +255,7 @@ test("update event validation happens before any request", async () => {
   for (const args of [
     { eventId: "900" },
     { eventId: "abc", title: "x" },
-    { eventId: "900", startsAt: "2026-10-12T18:30:00" },
+    { eventId: "900", startsAt: "6:30 PM" },
     { eventId: "900", startDate: "2026-10-12", startsAt: "2026-10-12T18:30:00Z" },
     { eventId: "900", allDay: true, startsAt: "2026-10-12T18:30:00Z" },
     { eventId: "900", allDay: false, startDate: "2026-10-12" },
@@ -235,7 +276,7 @@ test("delete event previews one occurrence, makes no request but the lookup, and
   const r = await t.callTool("skylight_delete_event", { eventId: "900-1791803100", applyTo: "one" });
   const d = r.data as { confirmed: boolean; wouldDelete: Record<string, unknown>; message: string };
   assert.equal(d.confirmed, false);
-  assert.deepEqual(d.wouldDelete, { id: "900-1791803100", masterId: "900", title: "Practice", startsAt: "2026-10-12T21:00:00.000Z", applyTo: "one", recurring: true });
+  assert.deepEqual(d.wouldDelete, { id: "900-1791803100", masterId: "900", title: "Practice", startsAt: "2026-10-12T17:00:00-04:00", when: "Mon Oct 12, 5:00 PM EDT to 7:30 PM EDT", applyTo: "one", recurring: true });
   assert.match(d.message, /Nothing was deleted/);
   assert.match(d.message, /only this occurrence/);
   assert.equal(writes(t).length, 0);
@@ -343,6 +384,13 @@ test("event tools are annotated: read, create, update, destroy", async () => {
   assert.equal(a("skylight_update_event").idempotentHint, true);
   assert.deepEqual([a("skylight_delete_event").destructiveHint, a("skylight_delete_event").idempotentHint], [true, false]);
   assert.match(tools.get("skylight_delete_event")!.description ?? "", /confirm: true/);
-  assert.match(tools.get("skylight_create_event")!.description ?? "", /UTC offset/);
+  assert.match(tools.get("skylight_create_event")!.description ?? "", /Eastern time/);
+  await t.close();
+});
+
+test("update event converts a bare startsAt to an explicit Eastern offset", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, lookupRoute([]), { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }]);
+  await t.callTool("skylight_update_event", { eventId: "900", startsAt: "2026-07-12T09:00", endsAt: "2026-07-12T10:00" });
+  assert.deepEqual(writes(t)[0]!.body, { starts_at: "2026-07-12T09:00:00-04:00", ends_at: "2026-07-12T10:00:00-04:00", all_day: false });
   await t.close();
 });

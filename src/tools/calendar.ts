@@ -4,6 +4,7 @@ import { buildEventCreateBody, buildEventUpdateBody, MAX_EVENT_TITLE_LENGTH, MAX
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { addDays, assertDate, assertId, localDateString, parseEventId, type EventRef } from "../skylight/ids.js";
 import { mapEvent, mapEvents, type CalendarEvent } from "../skylight/types.js";
+import { formatHuman, formatHumanTime, formatOffsetDateTime, zoneLabel } from "../skylight/time.js";
 import { EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, OWN_EVENT_SOURCE } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { recurrenceShape } from "./chores.js";
@@ -56,6 +57,29 @@ function assertOwnEvent(event: CalendarEvent | null): void {
   }
 }
 
+export type PresentedEvent = Omit<CalendarEvent, "startsAt" | "endsAt"> & { startsAt: string | null; endsAt: string | null; when: string | null };
+
+/** The date part of an all-day value (Skylight stores all-day events as UTC midnight; converting would shift the day). */
+const dayOf = (iso: string | null): string | null => (iso === null ? null : iso.slice(0, 10));
+
+/** Event for display: times in the configured zone (all-day events keep their dates) plus a human `when`. */
+export function presentEvent(e: CalendarEvent, tz: string): PresentedEvent {
+  if (e.allDay) {
+    const start = dayOf(e.startsAt);
+    const end = dayOf(e.endsAt);
+    const when = start === null ? null : end === null || end === start ? formatHuman(start, tz) : `${formatHuman(start, tz)} to ${formatHuman(end, tz)}`;
+    return { ...e, startsAt: start, endsAt: end, when };
+  }
+  const start = e.startsAt === null ? null : formatOffsetDateTime(e.startsAt, tz);
+  const end = e.endsAt === null ? null : formatOffsetDateTime(e.endsAt, tz);
+  let when: string | null = null;
+  if (start !== null) {
+    when = formatHuman(start, tz);
+    if (end !== null) when += start.slice(0, 10) === end.slice(0, 10) ? ` to ${formatHumanTime(end, tz)}` : ` to ${formatHuman(end, tz)}`;
+  }
+  return { ...e, startsAt: start, endsAt: end, when };
+}
+
 function byStart(a: CalendarEvent, b: CalendarEvent): number {
   const ta = a.startsAt === null ? Infinity : Date.parse(a.startsAt);
   const tb = b.startsAt === null ? Infinity : Date.parse(b.startsAt);
@@ -65,19 +89,19 @@ function byStart(a: CalendarEvent, b: CalendarEvent): number {
 
 const eventIdSchema = z.string().describe("Event id exactly as returned by skylight_list_events: digits, or digits-digits for one occurrence of a recurring event.");
 
-const eventFieldShape = {
+const eventFieldShape = (tz: string) => ({
   allDay: z.boolean().optional().describe("true for an all-day event (then use startDate/endDate). Default false (then use startsAt/endsAt)."),
   startDate: z.string().optional().describe("All-day events: first day YYYY-MM-DD."),
   endDate: z.string().optional().describe("All-day events: last day YYYY-MM-DD (inclusive; same as startDate for a single day). Default startDate."),
-  startsAt: z.string().optional().describe("Timed events: start with a UTC offset, e.g. 2026-10-12T18:30:00-04:00. A time without an offset is refused, because Skylight reads bare times as UTC."),
-  endsAt: z.string().optional().describe("Timed events: end with a UTC offset. Default one hour after startsAt."),
-  timezone: z.string().optional().describe("IANA timezone such as America/New_York. Default: the timezone of the machine running this server."),
+  startsAt: z.string().optional().describe(`Timed events: start as YYYY-MM-DDTHH:mm, read as ${zoneLabel(tz)} unless you add an explicit offset such as -04:00 or Z.`),
+  endsAt: z.string().optional().describe("Timed events: end, same format as startsAt. Default one hour after startsAt."),
+  timezone: z.string().optional().describe(`IANA timezone stored on the event. Default ${tz}.`),
   recurrence: recurrenceShape.optional().describe("Repeat schedule. Omit for a one-off event."),
   location: z.string().optional().describe(`Place name or address, up to ${MAX_LOCATION_LENGTH} characters.`),
   description: z.string().optional().describe("Notes, up to 500 characters."),
   emoji: z.string().optional().describe("Single emoji icon."),
   countdown: z.boolean().optional().describe("Show a countdown to the event on the Skylight display. Default false."),
-};
+});
 
 const deleteScope = z.enum(EXPOSED_APPLY_TO_VALUES as [string, ...string[]]).optional()
   .describe("\"one\" = only this occurrence, \"future\" = this occurrence and all later ones (both need an occurrence id), \"all\" = the whole series (sent as a delete of the master id). Omit for a one-off event or to delete a whole series by its plain id.");
@@ -85,11 +109,12 @@ const updateScope = z.enum(EXPOSED_UPDATE_APPLY_TO_VALUES as [string, ...string[
   .describe("\"all\" = apply to the whole recurring series. Omit for one-off events. (Per-occurrence scopes are not available for update.)");
 
 export function registerCalendarTools(server: McpServer, ctx: ToolContext): void {
+  const tz = ctx.config.timezone;
   server.registerTool(
     "skylight_list_events",
     {
       title: "List calendar events",
-      description: `List calendar events between two dates (default today through 7 days ahead, at most ${MAX_EVENT_SPAN_DAYS} days apart), sorted by start, as { id, masterId, title, startsAt, endsAt, allDay, timezone, recurring, recurrenceRule, location, description, emoji, profileIds, source, editable }. Occurrences of a recurring event have ids like 123-1791803100 (masterId-unixSeconds); pass ids exactly as listed. source is "skylight" for events created here or in the Skylight app; events synced from Google or another calendar have another source and cannot be changed with these tools. Optionally filter by profileId.`,
+      description: `List calendar events between two dates (default today through 7 days ahead, at most ${MAX_EVENT_SPAN_DAYS} days apart), sorted by start, as { id, masterId, title, startsAt, endsAt, when, allDay, timezone, recurring, recurrenceRule, location, description, emoji, profileIds, source, editable }. All times are shown in ${zoneLabel(tz)} with an explicit offset, and "when" is the same time in plain words; all-day events show dates only. Occurrences of a recurring event have ids like 123-1791803100 (masterId-unixSeconds); pass ids exactly as listed. source is "skylight" for events created here or in the Skylight app; events synced from Google or another calendar have another source and cannot be changed with these tools. Optionally filter by profileId.`,
       inputSchema: {
         after: z.string().optional().describe("First day YYYY-MM-DD (inclusive). Default today."),
         before: z.string().optional().describe(`Last day YYYY-MM-DD (inclusive). Default 7 days after "after"; at most ${MAX_EVENT_SPAN_DAYS} days after it.`),
@@ -105,7 +130,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       const profileId = args.profileId === undefined ? null : assertId(args.profileId, "profileId");
       const frameId = await ctx.frames.resolve();
       const events = mapEvents(await ctx.client.request({ method: "GET", path: eventsPath(frameId), query: { date_min: after, date_max: before } }));
-      return events.filter((e) => profileId === null || e.profileIds.includes(profileId)).sort(byStart);
+      return events.filter((e) => profileId === null || e.profileIds.includes(profileId)).sort(byStart).map((e) => presentEvent(e, tz));
     })
   );
 
@@ -113,20 +138,20 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
     "skylight_create_event",
     {
       title: "Create a calendar event",
-      description: "Create one calendar event. Timed events need startsAt with a UTC offset (e.g. 2026-10-12T18:30:00-04:00; a time without an offset is refused because Skylight would read it as UTC); the end defaults to one hour later. All-day events use allDay: true with startDate (and endDate for several days). profileIds may be people or labels such as Birthdays. Add recurrence for a repeating event. Not idempotent: repeating the call creates a duplicate.",
+      description: `Create one calendar event. Timed events take startsAt as YYYY-MM-DDTHH:mm, read as ${zoneLabel(tz)} unless you add an explicit offset (e.g. 2026-10-12T18:30:00-04:00 or ...Z); the tool converts it to an explicit offset itself, so just give the local time the user said. The end defaults to one hour later. All-day events use allDay: true with startDate (and endDate for several days). profileIds may be people or labels such as Birthdays. Add recurrence for a repeating event. Not idempotent: repeating the call creates a duplicate.`,
       inputSchema: {
         title: z.string().describe(`Event title, up to ${MAX_EVENT_TITLE_LENGTH} characters.`),
         profileIds: z.array(z.string()).min(1).max(20).describe("Profile or label ids from skylight_list_profiles."),
-        ...eventFieldShape,
+        ...eventFieldShape(tz),
       },
       annotations: ANNOTATIONS.create,
     },
     (args) => run(async () => {
-      const body = buildEventCreateBody(args as EventFields);
+      const body = buildEventCreateBody(args as EventFields, tz);
       const frameId = await ctx.frames.resolve();
       await assertProfilesExist(ctx, frameId, body.category_ids, "profileIds");
       const events = eventsFrom(await ctx.client.request<unknown>({ method: "POST", path: eventsPath(frameId), body }));
-      return { created: events.length, events, ...(events.length === 0 ? { warning: "Skylight returned no event; call skylight_list_events to confirm before retrying." } : {}) };
+      return { created: events.length, events: events.map((e) => presentEvent(e, tz)), ...(events.length === 0 ? { warning: "Skylight returned no event; call skylight_list_events to confirm before retrying." } : {}) };
     })
   );
 
@@ -134,12 +159,12 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
     "skylight_update_event",
     {
       title: "Update a calendar event",
-      description: "Change fields on an event created in Skylight. Only the provided fields change. Datetimes need a UTC offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited, and an occurrence id with no applyTo still updates the whole series through its master id. Events synced from Google or another calendar are refused: change them there.",
+      description: `Change fields on an event created in Skylight. Only the provided fields change. Datetimes are read as ${zoneLabel(tz)} unless you add an explicit offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited, and an occurrence id with no applyTo still updates the whole series through its master id. Events synced from Google or another calendar are refused: change them there.`,
       inputSchema: {
         eventId: eventIdSchema,
         title: z.string().optional().describe(`New title, up to ${MAX_EVENT_TITLE_LENGTH} characters.`),
         profileIds: z.array(z.string()).min(1).max(20).optional().describe("Replace the profiles or labels the event belongs to."),
-        ...eventFieldShape,
+        ...eventFieldShape(tz),
         applyTo: updateScope,
       },
       annotations: ANNOTATIONS.update,
@@ -147,13 +172,14 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
     (args) => run(async () => {
       const { eventId, applyTo, ...rest } = args;
       const ref = parseEventId(eventId, "eventId");
-      const body: Record<string, unknown> = buildEventUpdateBody(rest as EventFields);
+      const body: Record<string, unknown> = buildEventUpdateBody(rest as EventFields, tz);
       if (applyTo !== undefined) body.apply_to = applyTo;
       const frameId = await ctx.frames.resolve();
       if (Array.isArray(body.category_ids)) await assertProfilesExist(ctx, frameId, body.category_ids as string[], "profileIds");
       assertOwnEvent(await lookupEvent(ctx, frameId, ref, eventId));
       const json = await ctx.client.request<unknown>({ method: "PUT", path: `${eventsPath(frameId)}/${ref.masterId}`, body });
-      return eventsFrom(json)[0] ?? { id: ref.masterId, updated: true };
+      const updated = eventsFrom(json)[0];
+      return updated ? presentEvent(updated, tz) : { id: ref.masterId, updated: true };
     })
   );
 
@@ -180,6 +206,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       assertOwnEvent(found);
       const pathId = single ? args.eventId : ref.masterId;
       if (args.confirm !== true) {
+        const shown = found === null ? null : presentEvent(found, tz);
         const scope = applyTo === "one" ? "only this occurrence"
           : applyTo === "future" ? "this occurrence and all later ones"
           : found === null ? "this event, and every occurrence if it is a recurring series (could not check)"
@@ -187,7 +214,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
           : "this event";
         return {
           confirmed: false,
-          wouldDelete: { id: args.eventId, masterId: ref.masterId, title: found?.title ?? null, startsAt: found?.startsAt ?? null, applyTo: applyTo ?? null, recurring: found?.recurring ?? null },
+          wouldDelete: { id: args.eventId, masterId: ref.masterId, title: found?.title ?? null, startsAt: shown?.startsAt ?? null, when: shown?.when ?? null, applyTo: applyTo ?? null, recurring: found?.recurring ?? null },
           message: `Nothing was deleted. This would delete ${scope}${found ? ` ("${found.title}")` : ""}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }

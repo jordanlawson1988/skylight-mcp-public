@@ -1,7 +1,8 @@
 import { ValidationError } from "./errors.js";
 import { assertProfileIds, MAX_DESCRIPTION_LENGTH } from "./chore-payload.js";
-import { assertDate, assertDateTimeWithOffset, assertEmoji, cleanText } from "./ids.js";
+import { assertDate, assertEmoji, cleanText } from "./ids.js";
 import { buildRrule, type Recurrence } from "./rrule.js";
+import { toOffsetDateTime } from "./time.js";
 import { EVENT_KIND } from "./vocab.js";
 
 export const MAX_EVENT_TITLE_LENGTH = 200;
@@ -46,8 +47,6 @@ export interface EventCreateBody {
 
 export type EventUpdateBody = Partial<Pick<EventCreateBody, "summary" | "category_ids" | "starts_at" | "ends_at" | "all_day" | "rrule" | "location" | "description" | "emoji_icon" | "timezone" | "countdown_enabled">>;
 
-export const localTimezone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
-
 /** IANA zone name such as "America/New_York" (anything Intl accepts). */
 export function assertTimezone(value: string, field: string): string {
   if (typeof value !== "string" || value.trim() === "") throw new ValidationError(field, "must be an IANA timezone such as America/New_York");
@@ -90,8 +89,11 @@ function rruleOf(recurrence: Recurrence): string[] {
   return [buildRrule(recurrence)];
 }
 
-/** All-day: startDate (+ endDate, default the start). Timed: startsAt with a UTC offset (+ endsAt, default start + 1h). */
-export function buildEventCreateBody(input: EventFields): EventCreateBody {
+/**
+ * All-day: startDate (+ endDate, default the start). Timed: startsAt (+ endsAt, default start + 1h). A datetime without an offset is wall-clock
+ * time in `tz` (the configured zone) and leaves here with an explicit offset, because Skylight would read a bare time as UTC.
+ */
+export function buildEventCreateBody(input: EventFields, tz: string): EventCreateBody {
   if (input.title === undefined) throw new ValidationError("title", "is required");
   if (input.profileIds === undefined) throw new ValidationError("profileIds", "must list at least one profile id");
   const allDay = input.allDay === true;
@@ -106,8 +108,8 @@ export function buildEventCreateBody(input: EventFields): EventCreateBody {
   } else {
     if (input.startDate !== undefined || input.endDate !== undefined) throw new ValidationError("startDate", "is for all-day events; set allDay: true, or use startsAt and endsAt");
     if (input.startsAt === undefined) throw new ValidationError("startsAt", "is required for a timed event (or set allDay: true with startDate)");
-    startsAt = assertDateTimeWithOffset(input.startsAt, "startsAt");
-    endsAt = input.endsAt === undefined ? addHoursKeepingOffset(startsAt, 1) : assertDateTimeWithOffset(input.endsAt, "endsAt");
+    startsAt = toOffsetDateTime(input.startsAt, tz, "startsAt");
+    endsAt = input.endsAt === undefined ? addHoursKeepingOffset(startsAt, 1) : toOffsetDateTime(input.endsAt, tz, "endsAt");
     assertNotBefore(startsAt, endsAt, "endsAt");
   }
   const text: { summary?: string; location?: string | null; description?: string | null; emoji_icon?: string | null } = {};
@@ -128,13 +130,13 @@ export function buildEventCreateBody(input: EventFields): EventCreateBody {
     emoji_icon: text.emoji_icon ?? null,
     calendar_account_id: null,
     calendar_id: null,
-    timezone: input.timezone === undefined ? localTimezone() : assertTimezone(input.timezone, "timezone"),
+    timezone: input.timezone === undefined ? tz : assertTimezone(input.timezone, "timezone"),
     countdown_enabled: input.countdown ?? false,
   };
 }
 
 /** Only the provided fields. Dates imply all_day: true, datetimes imply all_day: false. */
-export function buildEventUpdateBody(input: EventFields): EventUpdateBody {
+export function buildEventUpdateBody(input: EventFields, tz: string): EventUpdateBody {
   const out: EventUpdateBody = {};
   const hasDates = input.startDate !== undefined || input.endDate !== undefined;
   const hasTimes = input.startsAt !== undefined || input.endsAt !== undefined;
@@ -147,8 +149,8 @@ export function buildEventUpdateBody(input: EventFields): EventUpdateBody {
     if (out.starts_at !== undefined && out.ends_at !== undefined && out.ends_at < out.starts_at) throw new ValidationError("endDate", "must not be before startDate");
     out.all_day = true;
   } else if (hasTimes) {
-    if (input.startsAt !== undefined) out.starts_at = assertDateTimeWithOffset(input.startsAt, "startsAt");
-    if (input.endsAt !== undefined) out.ends_at = assertDateTimeWithOffset(input.endsAt, "endsAt");
+    if (input.startsAt !== undefined) out.starts_at = toOffsetDateTime(input.startsAt, tz, "startsAt");
+    if (input.endsAt !== undefined) out.ends_at = toOffsetDateTime(input.endsAt, tz, "endsAt");
     if (out.starts_at !== undefined && out.ends_at !== undefined) assertNotBefore(out.starts_at, out.ends_at, "endsAt");
     out.all_day = false;
   } else if (input.allDay !== undefined) {

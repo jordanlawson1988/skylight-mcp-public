@@ -104,16 +104,3 @@ export function assertHexColor(value: string, field: string): string {
   if (typeof value !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value)) throw new ValidationError(field, "must be a hex color like #CB434C");
   return value.toUpperCase();
 }
-
-const OFFSET_DATETIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
-
-/** `YYYY-MM-DDTHH:mm(:ss(.SSS)?)?` followed by `Z` or `+HH:mm`/`-HH:mm`. Skylight reads a bare datetime as UTC, so the offset is mandatory. */
-export function assertDateTimeWithOffset(value: string, field: string): string {
-  const m = typeof value === "string" ? OFFSET_DATETIME.exec(value) : null;
-  if (!m) throw new ValidationError(field, "must be a datetime like 2026-10-12T18:30:00-04:00 (date, time and UTC offset)");
-  if (m[5] === undefined) throw new ValidationError(field, "include a UTC offset, e.g. 2026-10-12T18:30:00-04:00, because Skylight reads bare times as UTC");
-  assertDate(m[1]!, field);
-  if (Number(m[2]) > 23 || Number(m[3]) > 59 || (m[4] !== undefined && Number(m[4]) > 59)) throw new ValidationError(field, "is not a real time of day");
-  if (m[5] !== "Z" && (Number(m[5].slice(1, 3)) > 23 || Number(m[5].slice(4, 6)) > 59)) throw new ValidationError(field, "has an invalid UTC offset");
-  return value;
-}

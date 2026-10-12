@@ -50,6 +50,16 @@ export function formatHuman(iso: string, tz: string): string {
   return allDay ? date : `${date}, ${get("hour")}:${get("minute")} ${get("dayPeriod")} ${get("timeZoneName")}`;
 }
 
+/** The clock part of formatHuman, e.g. `6:30 PM EDT`. Invalid input is returned unchanged. */
+export function formatHumanTime(iso: string, tz: string): string {
+  const human = formatHuman(iso, tz);
+  const at = human.indexOf(", ");
+  return at === -1 || DATE_ONLY.test(iso) ? human : human.slice(at + 2);
+}
+
+/** Zone name as people say it: Eastern time for the default zone, else the IANA name. */
+export const zoneLabel = (tz: string): string => (tz === DEFAULT_TIMEZONE ? `Eastern time (${tz})` : tz);
+
 /**
  * Turn a person's datetime into one with an explicit offset. `YYYY-MM-DDTHH:mm(:ss)?` is wall-clock time in `tz`; with `Z` or `±HH:mm`
  * the offset is kept. Throws ValidationError(field) for anything else.
