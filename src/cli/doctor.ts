@@ -25,13 +25,14 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
   const lines: string[] = [`skylight-mcp doctor`, ``];
   const s = await status(rt);
   lines.push(`API host:   ${s.apiHost}`);
+  lines.push(`Timezone:   ${rt.config.timezone} (set SKYLIGHT_TIMEZONE to change)`);
   if (!s.loggedIn) {
     if (s.credentialError) lines.push(`Login:      credential problem: ${s.credentialError}`);
     else lines.push(`Login:      not logged in. Run: skylight-mcp login`);
   } else if (s.needsLogin) {
     lines.push(`Login:      session expired or revoked. Run: skylight-mcp login`);
   } else {
-    lines.push(`Login:      Logged in (token valid until ${s.tokenExpiresAt})`);
+    lines.push(`Login:      Logged in (token valid until ${s.tokenExpiresWhen ?? s.tokenExpiresAt})`);
     try {
       const frames = await rt.frames.list();
       lines.push(`Frames:     ${frames.map((f) => `${f.id}${f.name ? ` (${f.name})` : ""}`).join(", ") || "none found"}`);
@@ -51,6 +52,7 @@ export async function doctor(rt: Runtime, opts: { serverPath?: string } = {}): P
   }
   const env: Record<string, string> = {};
   if (rt.config.frameId) env.SKYLIGHT_FRAME_ID = rt.config.frameId;
+  if (rt.config.timezoneExplicit) env.SKYLIGHT_TIMEZONE = rt.config.timezone;
   const config = { mcpServers: { skylight: { command: stableNodePath(), args: [serverPath], ...(Object.keys(env).length ? { env } : {}) } } };
   lines.push(``, `Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):`, ``, JSON.stringify(config, null, 2), ``);
   return `${lines.join("\n")}\n`;

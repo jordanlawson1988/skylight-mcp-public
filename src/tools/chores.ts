@@ -5,6 +5,7 @@ import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertId, assertTime, localDateString, parseChoreId } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
+import { formatOffsetDateTime } from "../skylight/time.js";
 import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, ROUTINE_SLOT_NAMES } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { personProfileProblems, assertPersonProfiles } from "./profiles.js";
@@ -160,7 +161,11 @@ const DELETE_SCOPE_TEXT = {
   none: "this chore",
 } as const;
 
+/** A chore for display: completedAt in the configured zone. */
+export const presentChore = <T extends { completedAt: string | null }>(c: T, tz: string): T => (c.completedAt === null ? c : { ...c, completedAt: formatOffsetDateTime(c.completedAt, tz) });
+
 export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
+  const tz = ctx.config.timezone;
   server.registerTool(
     "skylight_list_chores",
     {
@@ -186,7 +191,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       }));
       // One-time chores have no instanceDate; fall back to their start date so they sort with the rest.
       const key = (c: Chore) => c.instanceDate ?? c.start;
-      return chores.sort((a, b) => {
+      return chores.map((c) => presentChore(c, tz)).sort((a, b) => {
         const ka = key(a), kb = key(b);
         if (ka !== kb) {
           if (ka === null) return 1;
@@ -214,7 +219,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const frameId = await ctx.frames.resolve();
       if (body.category_ids.length > 0) await assertPersonProfiles(ctx, frameId, body.category_ids, "profileIds");
       const created = await createOne(ctx, frameId, body);
-      return { created, ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) };
+      return { created: created.map((c) => presentChore(c, tz)), ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) };
     })
   );
 
@@ -302,7 +307,8 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       } catch (e) {
         throw mapUpdateError(e);
       }
-      return mapChore((json as { data?: unknown })?.data) ?? { id, updated: true };
+      const updated = mapChore((json as { data?: unknown })?.data);
+      return updated ? presentChore(updated, tz) : { id, updated: true };
     })
   );
 
@@ -366,7 +372,8 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       } catch (e) {
         throw mapCompletionError(e);
       }
-      return { seriesId, instanceDate, status, chore: mapChore((json as { data?: unknown })?.data) };
+      const done = mapChore((json as { data?: unknown })?.data);
+      return { seriesId, instanceDate, status, chore: done ? presentChore(done, tz) : null };
     })
   );
 

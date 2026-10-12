@@ -52,6 +52,8 @@ test("status reports logged out, then logged in with frame", async () => {
   assert.equal(s.loggedIn, true);
   assert.equal(s.frameId, "77");
   assert.ok(s.tokenExpiresAt);
+  assert.equal(s.timezone, "America/New_York");
+  assert.match(s.tokenExpiresAtLocal ?? "", /-0[45]:00$/);
   assert.ok(!JSON.stringify(s).includes("AT"));
   await cleanup();
 });

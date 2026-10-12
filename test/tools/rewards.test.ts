@@ -394,3 +394,22 @@ test("redeem with confirm refuses locally when the balance is below the cost, wi
   assert.equal(writes(t).length, 0);
   await t.close();
 });
+
+test("redeemedAt is shown in Eastern time across list, redeem result and unredeem", async () => {
+  const redeemedRow = rewardRes("2", { redeemed_at: "2026-10-01T10:00:00Z" });
+  const t = await connectTestClient([FRAMES, CATEGORIES,
+    { method: "GET", path: "/api/frames/77/rewards", handler: ({ url }) => ({ json: { data: url.searchParams.has("redeemed_at_min") ? [redeemedRow] : [] } }) },
+    { method: "POST", path: "/api/frames/77/rewards/2/unredeem", json: { data: { ...redeemedRow, attributes: { ...redeemedRow.attributes, redeemed_at: "2026-01-05T03:30:00.000Z" } } } }]);
+  const list = (await t.callTool("skylight_list_rewards", { includeRedeemed: true })).data as Array<{ redeemedAt: string | null }>;
+  assert.equal(list[0]!.redeemedAt, "2026-10-01T06:00:00-04:00");
+  const un = (await t.callTool("skylight_unredeem_reward", { rewardId: "2" })).data as { redeemedAt: string };
+  assert.equal(un.redeemedAt, "2026-01-04T22:30:00-05:00");
+  await t.close();
+  const t2 = await connectTestClient([FRAMES, CATEGORIES,
+    { method: "GET", path: "/api/frames/77/rewards/9", json: { data: rewardRes("9") } },
+    { method: "GET", path: "/api/frames/77/reward_points", json: [pts(12, 10)] },
+    { method: "POST", path: "/api/frames/77/rewards/9/redeem", json: { data: rewardRes("9", { redeemed_at: "2026-10-12T22:30:00.000Z" }) } }]);
+  const done = (await t2.callTool("skylight_redeem_reward", { rewardId: "9", confirm: true })).data as { reward: { redeemedAt: string } };
+  assert.equal(done.reward.redeemedAt, "2026-10-12T18:30:00-04:00");
+  await t2.close();
+});

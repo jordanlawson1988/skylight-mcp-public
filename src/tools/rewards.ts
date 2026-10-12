@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertId, assertPoints } from "../skylight/ids.js";
+import { formatOffsetDateTime } from "../skylight/time.js";
 import { buildRewardCreateBody, buildRewardUpdateBody, MAX_REWARD_COST, MAX_REWARD_TITLE_LENGTH } from "../skylight/reward-payload.js";
 import { mapRewardPoints, mapRewardResponse, mapRewards, type Profile, type Reward } from "../skylight/types.js";
 import type { ProfileKind } from "../skylight/vocab.js";
@@ -24,6 +25,9 @@ async function readBalances(ctx: ToolContext, frameId: string): Promise<Balance[
     return { profileId: b.profileId, name: p?.name ?? null, kind: p?.kind ?? null, points: b.points, lifetimePoints: b.lifetimePoints };
   });
 }
+
+/** A reward for display: redeemedAt in the configured zone. */
+export const presentReward = <T extends { redeemedAt: string | null }>(r: T, tz: string): T => (r.redeemedAt === null ? r : { ...r, redeemedAt: formatOffsetDateTime(r.redeemedAt, tz) });
 
 const rewardsPath = (frameId: string) => `/api/frames/${frameId}/rewards`;
 /** Lower bound for the redeemed-rewards query: every redemption since the epoch. */
@@ -49,6 +53,7 @@ async function redeemContext(ctx: ToolContext, frameId: string, id: string): Pro
 }
 
 export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
+  const tz = ctx.config.timezone;
   server.registerTool(
     "skylight_get_reward_points",
     { title: "Get reward point balances", description: "Current reward point balance per profile, as { profileId, name, kind, points, lifetimePoints }. Labels such as Birthdays are included with kind: \"label\" (they never earn points). Profile ids and names come from skylight_list_profiles.", inputSchema: {}, annotations: ANNOTATIONS.read },
@@ -96,10 +101,10 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
     (args) => run(async () => {
       const frameId = await ctx.frames.resolve();
       const open = mapRewards(await ctx.client.request({ method: "GET", path: rewardsPath(frameId) }));
-      if (args.includeRedeemed !== true) return open;
+      if (args.includeRedeemed !== true) return open.map((r) => presentReward(r, tz));
       const redeemed = mapRewards(await ctx.client.request({ method: "GET", path: rewardsPath(frameId), query: { redeemed_at_min: REDEEMED_FROM } }));
       const seen = new Set(open.map((r) => r.id));
-      return [...open, ...redeemed.filter((r) => !seen.has(r.id))];
+      return [...open, ...redeemed.filter((r) => !seen.has(r.id))].map((r) => presentReward(r, tz));
     })
   );
 
@@ -123,7 +128,7 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
       const frameId = await ctx.frames.resolve();
       await assertPersonProfiles(ctx, frameId, body.category_ids, "profileIds");
       const rewards = mapRewardResponse(await ctx.client.request<unknown>({ method: "POST", path: rewardsPath(frameId), body }));
-      return { created: rewards.length, rewards, ...(rewards.length === 0 ? { warning: "Skylight returned no rewards; call skylight_list_rewards to confirm before retrying." } : {}) };
+      return { created: rewards.length, rewards: rewards.map((r) => presentReward(r, tz)), ...(rewards.length === 0 ? { warning: "Skylight returned no rewards; call skylight_list_rewards to confirm before retrying." } : {}) };
     })
   );
 
@@ -150,7 +155,8 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
       const frameId = await ctx.frames.resolve();
       if (body.category_id !== undefined) await assertPersonProfiles(ctx, frameId, [body.category_id], "profileId");
       const json = await ctx.client.request<unknown>({ method: "PATCH", path: `${rewardsPath(frameId)}/${id}`, body });
-      return mapRewardResponse(json)[0] ?? { id, updated: true };
+      const updated = mapRewardResponse(json)[0];
+      return updated ? presentReward(updated, tz) : { id, updated: true };
     })
   );
 
@@ -192,7 +198,7 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
         }
         throw e;
       }
-      const redeemed = mapRewardResponse(json).find((r) => r.id === id) ?? reward;
+      const redeemed = presentReward(mapRewardResponse(json).find((r) => r.id === id) ?? reward, tz);
       try {
         const now = (await readBalances(ctx, frameId)).find((b) => b.profileId === reward.profileId) ?? null;
         return { redeemed: true, reward: redeemed, balance: now === null ? null : { profileId: now.profileId, name: now.name, points: now.points } };
@@ -214,7 +220,8 @@ export function registerRewardTools(server: McpServer, ctx: ToolContext): void {
       const id = assertId(args.rewardId, "rewardId");
       const frameId = await ctx.frames.resolve();
       const json = await ctx.client.request<unknown>({ method: "POST", path: `${rewardsPath(frameId)}/${id}/unredeem` });
-      return mapRewardResponse(json)[0] ?? { id, unredeemed: true };
+      const reward = mapRewardResponse(json)[0];
+      return reward ? presentReward(reward, tz) : { id, unredeemed: true };
     })
   );
 

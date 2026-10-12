@@ -31,6 +31,17 @@ test("skylight_auth_status never leaks tokens", async () => {
   await t.close();
 });
 
+test("skylight_auth_status shows the token expiry in the configured zone and keeps the ISO", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const d = (await t.callTool("skylight_auth_status")).data as { tokenExpiresAt: string; tokenExpiresAtLocal: string; tokenExpiresWhen: string; timezone: string };
+  assert.match(d.tokenExpiresAt, /Z$/);
+  assert.equal(d.timezone, "America/New_York");
+  assert.match(d.tokenExpiresAtLocal, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-0[45]:00$/);
+  assert.match(d.tokenExpiresWhen, /^\w{3} \w{3} \d{1,2}, \d{1,2}:\d{2} [AP]M E[SD]T$/);
+  assert.equal(Date.parse(d.tokenExpiresAtLocal), Date.parse(d.tokenExpiresAt.replace(/\.\d+Z$/, "Z")));
+  await t.close();
+});
+
 test("skylight_list_profiles maps categories", async () => {
   const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/categories", json: { data: [{ id: "12", attributes: { label: "Ellie", color: "#f00", linked_to_profile: true, selected_for_chore_chart: false } }] } }]);
   const r = await t.callTool("skylight_list_profiles");

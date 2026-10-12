@@ -911,3 +911,20 @@ test("move routine step is annotated idempotent update", async () => {
   assert.match(tool.description ?? "", /position/);
   await t.close();
 });
+
+test("list chores shows completedAt in Eastern time", async () => {
+  const done = { ...chore("9", "Walk dog"), attributes: { summary: "Walk dog", start: "2026-10-13", completed_at: "2026-08-27T16:00:00.000Z" } };
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [done, chore("10", "Open")] } }]);
+  const d = (await t.callTool("skylight_list_chores", { after: "2026-10-01", before: "2026-10-31" })).data as Array<{ id: string; completedAt: string | null }>;
+  assert.equal(d.find((c) => c.id === "9")!.completedAt, "2026-08-27T12:00:00-04:00");
+  assert.equal(d.find((c) => c.id === "10")!.completedAt, null);
+  await t.close();
+});
+
+test("complete chore shows the returned completedAt in Eastern time", async () => {
+  const done = { ...chore("9", "Walk dog"), attributes: { summary: "Walk dog", start: "2026-10-13", completed_at: "2026-01-27T16:00:00Z" } };
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/9/completions", json: { data: done } }]);
+  const d = (await t.callTool("skylight_complete_chore", { choreId: "9" })).data as { chore: { completedAt: string } };
+  assert.equal(d.chore.completedAt, "2026-01-27T11:00:00-05:00");
+  await t.close();
+});
