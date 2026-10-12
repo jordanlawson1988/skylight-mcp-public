@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { connectTestClient } from "../helpers/test-server.js";
 import type { MockRoute } from "../helpers/mock-fetch.js";
 
@@ -14,7 +15,7 @@ test("list chores passes query and maps", async () => {
   const q = t.calls.at(-1)!.url.searchParams;
   assert.equal(q.get("after"), "2026-10-01");
   assert.equal(q.get("include_late"), "false");
-  assert.equal(q.get("include_up_for_grabs"), "false");
+  assert.equal(q.get("include_up_for_grabs"), "true");
   assert.equal(q.get("filter"), "linked_to_profile");
   await t.close();
 });
@@ -537,5 +538,63 @@ test("tool schemas expose timeOfDay with the slot names and describe startTime a
   const props = create.inputSchema.properties as Record<string, { enum?: string[]; description?: string }>;
   assert.deepEqual(props.timeOfDay!.enum, ["morning", "afternoon", "evening"]);
   assert.match(props.startTime!.description ?? "", /Not allowed on routine steps/);
+  await t.close();
+});
+
+test("list chores: includeUpForGrabs defaults to true and can be turned off", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }]);
+  await t.callTool("skylight_list_chores", { after: "2026-10-01", before: "2026-10-02" });
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("include_up_for_grabs"), "true");
+  await t.callTool("skylight_list_chores", { after: "2026-10-01", before: "2026-10-02", includeUpForGrabs: false });
+  assert.equal(t.calls.at(-1)!.url.searchParams.get("include_up_for_grabs"), "false");
+  await t.close();
+});
+
+test("list chores returns the live fixture including the claimed up-for-grabs chore", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: JSON.parse(readFileSync(new URL("../fixtures/chores.json", import.meta.url), "utf8")) }]);
+  const r = await t.callTool("skylight_list_chores", { after: "2026-05-01", before: "2026-10-31" });
+  const d = r.data as Array<{ id: string; upForGrabs: boolean; completedByProfileId: string | null; timeOfDay: string | null }>;
+  assert.deepEqual(d.map((c) => c.id), ["65827263-2026-05-19", "60913118-2026-10-12-0600", "93308731"]);
+  assert.deepEqual(d.find((c) => c.id === "93308731"), { ...d.find((c) => c.id === "93308731")!, upForGrabs: true, completedByProfileId: "15057970" });
+  assert.equal(d.find((c) => c.id === "60913118-2026-10-12-0600")!.timeOfDay, "morning");
+  await t.close();
+});
+
+test("create an unassigned up-for-grabs chore with no start", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/create_multiple", json: { data: [{ id: "9", attributes: { summary: "Wash car", up_for_grabs: true, start: null }, relationships: { category: { data: null } } }] } }]);
+  const r = await t.callTool("skylight_create_chore", { summary: "Wash car", upForGrabs: true, description: "Front and back", timerSeconds: 600 });
+  assert.equal(r.isError, false);
+  const body = t.calls.at(-1)!.body as Record<string, unknown>;
+  assert.equal(body.up_for_grabs, true);
+  assert.equal(body.start, null);
+  assert.deepEqual(body.category_ids, []);
+  assert.equal(body.description, "Front and back");
+  assert.equal(body.timer_seconds, 600);
+  assert.equal((r.data as { created: Array<{ upForGrabs: boolean }> }).created[0]!.upForGrabs, true);
+  await t.close();
+});
+
+test("create without start or profileIds is rejected unless up for grabs, and names the field", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const noStart = await t.callTool("skylight_create_chore", { summary: "x", profileIds: ["12"] });
+  assert.equal(noStart.isError, true);
+  assert.match(noStart.text, /start: is required unless upForGrabs is true/);
+  const noProfiles = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13" });
+  assert.equal(noProfiles.isError, true);
+  assert.match(noProfiles.text, /profileIds: is required unless upForGrabs is true/);
+  const bulk = await t.callTool("skylight_bulk_create_chores", { dryRun: true, chores: [{ summary: "x" }, { summary: "y", upForGrabs: true }] });
+  const d = bulk.data as { results: Array<{ ok: boolean; error?: string }> };
+  assert.deepEqual(d.results.map((x) => x.ok), [false, true]);
+  assert.ok(!t.calls.some((c) => c.method === "POST"));
+  await t.close();
+});
+
+test("update chore sends description and timer_seconds", async () => {
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "x") } }]);
+  const r = await t.callTool("skylight_update_chore", { choreId: "5", description: "More detail", timerSeconds: 90 });
+  assert.equal(r.isError, false);
+  assert.deepEqual(t.calls.at(-1)!.body, { description: "More detail", timer_seconds: 90 });
+  const bad = await t.callTool("skylight_update_chore", { choreId: "5", timerSeconds: 90000 }).catch(() => ({ isError: true }));
+  assert.equal(bad.isError, true);
   await t.close();
 });

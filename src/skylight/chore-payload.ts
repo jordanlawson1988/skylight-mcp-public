@@ -5,8 +5,10 @@ import { ROUTINE_SLOTS, type RoutineSlot } from "./vocab.js";
 
 export interface ChoreInput {
   summary: string;
-  start: string;
-  profileIds: string[];
+  /** Required unless upForGrabs is true. */
+  start?: string;
+  /** Required unless upForGrabs is true. */
+  profileIds?: string[];
   startTime?: string;
   recurrence?: Recurrence;
   routine?: boolean;
@@ -15,11 +17,13 @@ export interface ChoreInput {
   upForGrabs?: boolean;
   rewardPoints?: number;
   emoji?: string;
+  description?: string;
+  timerSeconds?: number;
 }
 
 export interface ChoreCreateBody {
   summary: string;
-  start: string;
+  start: string | null;
   start_time: string | null;
   routine: boolean;
   up_for_grabs: boolean;
@@ -28,9 +32,18 @@ export interface ChoreCreateBody {
   category_ids: string[];
   reward_points: number | null;
   emoji_icon: string | null;
+  description: string | null;
+  timer_seconds: number | null;
 }
 
 export const MAX_PROFILES_PER_CHORE = 20;
+export const MAX_DESCRIPTION_LENGTH = 500;
+export const MAX_TIMER_SECONDS = 86_400;
+
+export function assertTimerSeconds(value: number, field: string): number {
+  if (!Number.isInteger(value) || value < 0 || value > MAX_TIMER_SECONDS) throw new ValidationError(field, `must be an integer from 0 to ${MAX_TIMER_SECONDS}`);
+  return value;
+}
 
 function profileIds(ids: string[]): string[] {
   if (!Array.isArray(ids) || ids.length === 0) throw new ValidationError("profileIds", "must list at least one profile id");
@@ -64,17 +77,24 @@ export function buildChoreCreateBody(input: ChoreInput): ChoreCreateBody {
   else if (input.timeOfDay !== undefined) throw new ValidationError("routine", "timeOfDay is only for routine steps");
   else if (recurrenceInput !== undefined) recurrenceInput = plainRecurrence(recurrenceInput);
   const recurrence = recurrenceInput === undefined ? null : buildRrule(recurrenceInput);
+  const grabs = input.upForGrabs === true;
+  if (!grabs && input.start === undefined) throw new ValidationError("start", "is required unless upForGrabs is true");
+  if (!grabs && input.profileIds === undefined) throw new ValidationError("profileIds", "is required unless upForGrabs is true");
+  // Verified live: an up-for-grabs chore accepts category_ids: [] and start: null.
+  const categoryIds = input.profileIds === undefined || (grabs && input.profileIds.length === 0) ? [] : profileIds(input.profileIds);
   return {
     summary: cleanText(input.summary, "summary", 500),
-    start: assertDate(input.start, "start"),
+    start: input.start === undefined ? null : assertDate(input.start, "start"),
     start_time: input.startTime === undefined ? null : assertTime(input.startTime, "startTime"),
     routine: input.routine ?? false,
     up_for_grabs: input.upForGrabs ?? false,
     recurrence_set: recurrence === null ? null : [recurrence],
     recurring_until: recurrenceInput?.until ?? null,
-    category_ids: profileIds(input.profileIds),
+    category_ids: categoryIds,
     reward_points: input.rewardPoints === undefined ? null : assertPoints(input.rewardPoints, "rewardPoints"),
     emoji_icon: input.emoji === undefined ? null : assertEmoji(input.emoji, "emoji"),
+    description: input.description === undefined ? null : cleanText(input.description, "description", MAX_DESCRIPTION_LENGTH),
+    timer_seconds: input.timerSeconds === undefined ? null : assertTimerSeconds(input.timerSeconds, "timerSeconds"),
   };
 }
 
@@ -101,6 +121,8 @@ export function buildChoreUpdateBody(input: Partial<ChoreInput>): Partial<ChoreC
   if (input.profileIds !== undefined) out.category_ids = profileIds(input.profileIds);
   if (input.rewardPoints !== undefined) out.reward_points = assertPoints(input.rewardPoints, "rewardPoints");
   if (input.emoji !== undefined) out.emoji_icon = assertEmoji(input.emoji, "emoji");
+  if (input.description !== undefined) out.description = cleanText(input.description, "description", MAX_DESCRIPTION_LENGTH);
+  if (input.timerSeconds !== undefined) out.timer_seconds = assertTimerSeconds(input.timerSeconds, "timerSeconds");
   if (Object.keys(out).length === 0) throw new ValidationError("update", "provide at least one field to change");
   return out;
 }

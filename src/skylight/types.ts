@@ -14,6 +14,14 @@ export interface Chore {
   instanceTime: string | null;
   /** Which routine a routine step belongs to (from its time or the rule's BYHOUR). Null for ordinary chores. */
   timeOfDay: RoutineSlot | null;
+  /** True for chores anyone can claim; they have no assigned profile (profileIds is empty) and may have no start date. */
+  upForGrabs: boolean;
+  /** Profile that completed the chore (relationships.completed_category); set on claimed/finished up-for-grabs chores. */
+  completedByProfileId: string | null;
+  description: string | null;
+  timerSeconds: number | null;
+  position: number | null;
+  completedAt: string | null;
 }
 export interface RewardPoints { profileId: string; points: number; lifetimePoints: number | null }
 export interface Reward {
@@ -85,6 +93,9 @@ export function mapChore(resource: unknown): Chore | null {
     seriesId: idOf(a.series) ?? ref.seriesId,
     instanceDate: ref.instanceDate ?? (recurring ? str(a.start) : null),
     instanceTime,
+    upForGrabs: bool(a.up_for_grabs) ?? false,
+    completedByProfileId: idOf(rec(rec(rec(r.relationships).completed_category).data).id),
+    description: str(a.description), timerSeconds: num(a.timer_seconds), position: num(a.position), completedAt: str(a.completed_at),
     timeOfDay: routine ? slotFromStartTime(instanceTime) ?? slotFromHour(hourFromRrule(rule)) : null,
   };
 }

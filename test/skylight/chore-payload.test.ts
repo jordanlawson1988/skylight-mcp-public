@@ -7,6 +7,7 @@ test("minimal chore body matches Skylight create_multiple shape", () => {
   assert.deepEqual(buildChoreCreateBody({ summary: " Feed dog ", start: "2026-10-13", profileIds: ["12"] }), {
     summary: "Feed dog", start: "2026-10-13", start_time: null, routine: false, up_for_grabs: false,
     recurrence_set: null, recurring_until: null, category_ids: ["12"], reward_points: null, emoji_icon: null,
+    description: null, timer_seconds: null,
   });
 });
 
@@ -75,4 +76,28 @@ test("update applies the routine rules only to the fields passed", () => {
   assert.throws(() => buildChoreUpdateBody({ timeOfDay: "morning", startTime: "06:00" }), /routines use timeOfDay/);
   assert.throws(() => buildChoreUpdateBody({ timeOfDay: "morning" }), (e: unknown) => e instanceof ValidationError && e.field === "recurrence");
   assert.deepEqual(buildChoreUpdateBody({ startTime: "08:00" }), { start_time: "08:00" });
+});
+
+test("up-for-grabs chores may omit start and profileIds; others may not", () => {
+  const b = buildChoreCreateBody({ summary: "Wash car", upForGrabs: true });
+  assert.equal(b.start, null);
+  assert.deepEqual(b.category_ids, []);
+  assert.equal(b.up_for_grabs, true);
+  const dated = buildChoreCreateBody({ summary: "Wash car", upForGrabs: true, start: "2026-10-13" });
+  assert.equal(dated.start, "2026-10-13");
+  assert.deepEqual(buildChoreCreateBody({ summary: "x", upForGrabs: true, profileIds: ["3"] }).category_ids, ["3"]);
+  assert.throws(() => buildChoreCreateBody({ summary: "x", profileIds: ["1"] }), (e: unknown) => e instanceof ValidationError && e.field === "start");
+  assert.throws(() => buildChoreCreateBody({ summary: "x", start: "2026-10-13" }), (e: unknown) => e instanceof ValidationError && e.field === "profileIds");
+  assert.throws(() => buildChoreCreateBody({ summary: "x", start: "2026-10-13", upForGrabs: false }), (e: unknown) => e instanceof ValidationError && e.field === "profileIds");
+});
+
+test("description and timerSeconds are validated and sent on create and update", () => {
+  const b = buildChoreCreateBody({ summary: "x", start: "2026-10-13", profileIds: ["1"], description: "  Use the blue sponge ", timerSeconds: 300 });
+  assert.equal(b.description, "Use the blue sponge");
+  assert.equal(b.timer_seconds, 300);
+  assert.deepEqual(buildChoreUpdateBody({ description: "Hi", timerSeconds: 0 }), { description: "Hi", timer_seconds: 0 });
+  for (const [patch, field] of [[{ description: "" }, "description"], [{ description: "x".repeat(501) }, "description"], [{ timerSeconds: -1 }, "timerSeconds"], [{ timerSeconds: 86401 }, "timerSeconds"], [{ timerSeconds: 1.5 }, "timerSeconds"]] as const) {
+    assert.throws(() => buildChoreCreateBody({ summary: "x", start: "2026-10-13", profileIds: ["1"], ...patch }), (e: unknown) => e instanceof ValidationError && e.field === field);
+  }
+  assert.equal(buildChoreCreateBody({ summary: "x", start: "2026-10-13", profileIds: ["1"], timerSeconds: 86400 }).timer_seconds, 86400);
 });

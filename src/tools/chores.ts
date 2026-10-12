@@ -21,15 +21,17 @@ export const recurrenceShape = z.object({
 
 export const choreInputShape = {
   summary: z.string().describe("Chore title, e.g. \"Feed the dog\"."),
-  start: z.string().describe("First date YYYY-MM-DD."),
-  profileIds: z.array(z.string()).min(1).max(20).describe("Profile ids from skylight_list_profiles. One chore is created per profile."),
+  start: z.string().optional().describe("First date YYYY-MM-DD. Required unless upForGrabs is true (up-for-grabs chores may have no date)."),
+  profileIds: z.array(z.string()).min(1).max(20).optional().describe("Profile ids from skylight_list_profiles. One chore is created per profile. Required unless upForGrabs is true (then omit it for an unassigned chore anyone can claim)."),
   startTime: z.string().optional().describe("HH:mm 24-hour. Not allowed on routine steps."),
   recurrence: recurrenceShape.optional().describe("Omit for a one-off chore."),
   routine: z.boolean().optional().describe("true makes this a routine step instead of a chore (needs timeOfDay, no startTime; recurrence defaults to daily). Default false."),
   timeOfDay: z.enum(ROUTINE_SLOT_NAMES).optional().describe("Routine steps only: which routine the step belongs to. Required when routine is true."),
-  upForGrabs: z.boolean().optional().describe("true lets any profile claim it. Default false."),
+  upForGrabs: z.boolean().optional().describe("true lets any profile claim it; start and profileIds then become optional. Default false."),
   rewardPoints: z.number().int().optional().describe("Points earned on completion."),
   emoji: z.string().optional().describe("Single emoji icon."),
+  description: z.string().optional().describe("Longer details shown on the chore, up to 500 characters."),
+  timerSeconds: z.number().int().min(0).max(86400).optional().describe("Countdown timer length in seconds (0-86400)."),
 };
 
 const deleteApplyToSchema = z.enum(EXPOSED_APPLY_TO_VALUES as [string, ...string[]]).optional()
@@ -122,7 +124,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         after: z.string().optional().describe("Start date YYYY-MM-DD (inclusive). Default today."),
         before: z.string().optional().describe("End date YYYY-MM-DD (inclusive). Default 14 days from today."),
         includeLate: z.boolean().optional().describe("Also return overdue (late) occurrences from before the window. Default false; can be large."),
-        includeUpForGrabs: z.boolean().optional().describe("Include unassigned up-for-grabs chores. Default false."),
+        includeUpForGrabs: z.boolean().optional().describe("Include unassigned up-for-grabs chores (upForGrabs: true, no profileIds; completedByProfileId once claimed). Default true."),
       },
       annotations: ANNOTATIONS.read,
     },
@@ -134,7 +136,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const frameId = await ctx.frames.resolve();
       const chores = mapChores(await ctx.client.request({
         method: "GET", path: choresPath(frameId),
-        query: { after, before, include_late: args.includeLate ?? false, include_up_for_grabs: args.includeUpForGrabs ?? false, filter: "linked_to_profile" },
+        query: { after, before, include_late: args.includeLate ?? false, include_up_for_grabs: args.includeUpForGrabs ?? true, filter: "linked_to_profile" },
       }));
       // One-time chores have no instanceDate; fall back to their start date so they sort with the rest.
       const key = (c: Chore) => c.instanceDate ?? c.start;
@@ -154,7 +156,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_create_chore",
     {
       title: "Create a chore or routine step",
-      description: "Create one chore (or routine step with routine: true) assigned to one or more profiles. For many chores at once use skylight_bulk_create_chores.",
+      description: "Create one chore (or routine step with routine: true plus timeOfDay) assigned to one or more profiles. For a chore anyone can claim, set upForGrabs: true and omit profileIds (start is then optional too). For many chores at once use skylight_bulk_create_chores.",
       inputSchema: choreInputShape,
       annotations: ANNOTATIONS.create,
     },
@@ -220,6 +222,8 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         upForGrabs: choreInputShape.upForGrabs,
         rewardPoints: choreInputShape.rewardPoints,
         emoji: choreInputShape.emoji,
+        description: choreInputShape.description,
+        timerSeconds: choreInputShape.timerSeconds,
         applyTo: updateApplyToSchema,
       },
       annotations: ANNOTATIONS.update,

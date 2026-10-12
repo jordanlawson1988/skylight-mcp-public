@@ -34,7 +34,7 @@ test("mapChores flattens attributes and category relationships", () => {
     relationships: { categories: { data: [{ id: "12" }, { id: "13" }] } },
   }] });
   assert.equal(out.length, 2);
-  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"], seriesId: "900", instanceDate: "2026-10-13", instanceTime: null, timeOfDay: null });
+  assert.deepEqual(out[0], { id: "900", summary: "Dishes", start: "2026-10-13", startTime: "18:00", status: "pending", routine: false, recurring: true, recurrenceRule: "RRULE:FREQ=DAILY", rewardPoints: 2, emoji: "🍽️", profileIds: ["12"], seriesId: "900", instanceDate: "2026-10-13", instanceTime: null, timeOfDay: null, upForGrabs: false, completedByProfileId: null, description: null, timerSeconds: null, position: null, completedAt: null });
   assert.deepEqual(out[1]!.profileIds, ["12", "13"]);
   assert.equal(out[1]!.recurrenceRule, "RRULE:FREQ=WEEKLY");
   assert.equal(out[1]!.routine, false);
@@ -76,6 +76,22 @@ test("mapChores maps time-suffixed routine occurrence ids from the live fixture"
   assert.equal(routine.routine, true);
   assert.equal(out[1]!.instanceTime, null);
   assert.equal(out[1]!.instanceDate, "2026-05-19");
+});
+
+test("mapChores exposes the richer fields and up-for-grabs state from the live fixture", () => {
+  const [routine, , grabs] = mapChores(fixture("chores"));
+  assert.deepEqual([routine!.upForGrabs, routine!.position, routine!.description, routine!.timerSeconds, routine!.completedAt, routine!.completedByProfileId, routine!.profileIds], [false, 5, null, null, null, null, ["15057970"]]);
+  assert.equal(grabs!.id, "93308731");
+  assert.equal(grabs!.upForGrabs, true);
+  assert.deepEqual(grabs!.profileIds, []);
+  assert.equal(grabs!.completedByProfileId, "15057970");
+  assert.equal(grabs!.description, "Details");
+  assert.equal(grabs!.completedAt, "2026-08-27T16:00:00.000Z");
+  assert.equal(grabs!.position, 15);
+  assert.equal(grabs!.start, null);
+  assert.equal(grabs!.status, "complete");
+  assert.equal(grabs!.rewardPoints, 1);
+  assert.equal(grabs!.instanceDate, null);
 });
 
 test("instanceTime falls back to start_time for routine steps only", () => {
