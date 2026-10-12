@@ -103,7 +103,7 @@ If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` bl
 | `skylight_move_list_item` | Places an item after another item (`afterItemId`) or at the top (`null`). The target must be in the same section. |
 | `skylight_delete_list_items` | Deletes 1-100 items in one request. Preview lists their titles unless `confirm: true`. |
 | `skylight_list_events` | Lists calendar events between two dates (default today through 7 days ahead, at most 92 days) with `source` and `editable`. Occurrences of a recurring event have ids like `123-1791803100`. Optional `profileId` filter. |
-| `skylight_create_event` | Creates an event. Timed events take `startsAt` with a UTC offset such as `2026-10-12T18:30:00-04:00` (a time without an offset is refused, because Skylight reads it as UTC); the end defaults to one hour later. All-day events use `allDay: true` with `startDate` (and `endDate`). `profileIds` may be people or labels such as Birthdays. Optional `recurrence`, `timezone`, `location`, `description`, `emoji`, `countdown`. |
+| `skylight_create_event` | Creates an event. Timed events take `startsAt` as `2026-10-12T18:30`, read as Eastern time (or your `SKYLIGHT_TIMEZONE`) unless you add an offset such as `-04:00` or `Z`; the end defaults to one hour later. All-day events use `allDay: true` with `startDate` (and `endDate`). `profileIds` may be people or labels such as Birthdays. Optional `recurrence`, `timezone`, `location`, `description`, `emoji`, `countdown`. Results carry a human `when`. |
 | `skylight_update_event` | Changes fields on an event created in Skylight (the whole series for a recurring one, with `applyTo: "all"`). Refuses events synced from Google or another calendar. |
 | `skylight_delete_event` | Deletes an event. Preview unless `confirm: true`. `applyTo`: `one` or `future` need an occurrence id; `all`, or a plain id with no `applyTo`, deletes the whole series. Refuses synced events. |
 
@@ -125,6 +125,15 @@ Routine steps are chores with `routine: true` and a `timeOfDay` of `morning`, `a
   { "summary": "Pack backpack", "start": "2026-10-13", "profileIds": ["<Ellie>"], "routine": true, "timeOfDay": "morning" }
 ] }
 ```
+
+## Time zones
+
+Skylight stores and returns UTC. skylight-mcp shows you everything in one zone, Eastern time (`America/New_York`) by default, so EST and EDT are handled for you:
+
+- Times you type, such as `startsAt: "2026-10-12T18:30"`, are read as wall-clock time in that zone and sent to Skylight with the right offset (`-04:00` in summer, `-05:00` in winter). Without that conversion Skylight would store 18:30 as 18:30 UTC, which is 2:30 PM Eastern. Add an explicit offset or `Z` if you do mean another zone.
+- Times in results are shown in the same zone with an explicit offset (`2026-10-12T18:30:00-04:00`). Events also have a plain-words `when`, such as `Mon Oct 12, 6:30 PM EDT to 7:30 PM EDT`. All-day events show dates only.
+- This covers event start and end times, reward `redeemedAt`, chore `completedAt` and the login token expiry in `skylight_auth_status`, `skylight-mcp status`, `login` and `doctor`.
+- To use another zone, set `SKYLIGHT_TIMEZONE` to an IANA name such as `America/Chicago` in the `env` block of the Claude Desktop config (`skylight-mcp doctor` prints the block with the variable when it is set). An invalid name stops the server with an error naming the variable.
 
 ## Development
 

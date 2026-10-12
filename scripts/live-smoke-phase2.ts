@@ -188,9 +188,14 @@ export async function phase2Smoke(rt: Runtime, frameId: string, today: string): 
     const echoed = timed.events[0]?.startsAt ?? "";
     if (!echoed.startsWith(`${day1}T18:30:00`) || !echoed.endsWith("-04:00")) throw new Error(`timed event did not keep the local time and offset: ${echoed}`);
     step(`timed event keeps local time and offset (${echoed})`);
-    const bare = await call("skylight_create_event", { title: `${PREFIX} bare ${stamp}`, profileIds: [profileId], startsAt: `${day1}T18:30:00` });
-    if (!bare.isError || !/UTC offset/.test(bare.text)) throw new Error("a bare datetime was not refused");
-    step("bare datetime refused by the tool");
+    // A bare T18:30 is read as Eastern time and sent with an explicit offset (otherwise Skylight would store it as 18:30 UTC).
+    const bare = ok(await call("skylight_create_event", { title: `${PREFIX} bare ${stamp}`, profileIds: [profileId], startsAt: `${day1}T18:30` }), "create event from a bare time") as { events: Array<{ id: string; when: string | null }> };
+    const bareEvent = bare.events[0];
+    if (!bareEvent || !bareEvent.when?.includes("6:30 PM")) throw new Error(`bare-time event 'when' does not say 6:30 PM: ${JSON.stringify(bareEvent)}`);
+    const rawRows = (await get<{ data?: Array<{ id: string; attributes?: { starts_at?: string } }> }>("/calendar_events", { date_min: addDays(day1, -1), date_max: addDays(day1, 2) })).data ?? [];
+    const rawStart = rawRows.find((r) => r.id === bareEvent.id)?.attributes?.starts_at ?? "";
+    if (!rawStart.startsWith(`${day1}T18:30:00`) || !/-0[45]:00$/.test(rawStart)) throw new Error(`Skylight echoed the bare-time event as ${rawStart || "(not found)"}, not 18:30 with an Eastern offset`);
+    step(`bare 18:30 input stored with the Eastern offset (${rawStart}); when = ${bareEvent.when}`);
     const weekday = WEEKDAYS[(new Date(`${day1}T00:00:00Z`).getUTCDay() + 6) % 7]!;
     const weekly = ok(await call("skylight_create_event", { title: `${PREFIX} weekly ${stamp}`, profileIds: [profileId], startsAt: `${day1}T09:00:00-04:00`, timezone: "America/New_York", recurrence: { frequency: "weekly", weekdays: [weekday] } }), "create weekly event") as { events: Array<{ id: string }> };
     const master = weekly.events[0]?.id;
