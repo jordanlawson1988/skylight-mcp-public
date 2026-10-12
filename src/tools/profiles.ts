@@ -39,7 +39,7 @@ async function countUpcomingChores(ctx: ToolContext, frameId: string, profileId:
 
 /**
  * Problem text per id that is not a person profile on this frame (a label, or unknown), or null when the categories
- * lookup itself failed (the guard is a convenience and must never block a write).
+ * lookup failed or returned no parseable profiles (the guard is a convenience and must never block a write).
  */
 export async function personProfileProblems(ctx: ToolContext, frameId: string, ids: readonly string[]): Promise<Map<string, string> | null> {
   let profiles: Profile[];
@@ -49,6 +49,8 @@ export async function personProfileProblems(ctx: ToolContext, frameId: string, i
     if (e instanceof SkylightApiError) return null;
     throw e;
   }
+  // A response with no parseable profiles means we cannot tell anything (shape change, empty frame): never block on it.
+  if (profiles.length === 0) return null;
   const byId = new Map(profiles.map((p) => [p.id, p]));
   const problems = new Map<string, string>();
   for (const id of ids) {

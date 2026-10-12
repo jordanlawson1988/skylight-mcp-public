@@ -126,3 +126,13 @@ test("add reward points still posts when the categories lookup fails", async () 
   assert.equal(t.calls.filter((c) => c.method === "POST").length, 1);
   await t.close();
 });
+
+test("add reward points still posts when the categories response has no profiles", async () => {
+  for (const json of [{ data: [] }, {}]) {
+    const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/categories", json }, { method: "POST", path: "/api/frames/77/reward_points", json: { data: [] } }, { method: "GET", path: "/api/frames/77/reward_points", json: [pts(12, 5)] }]);
+    const r = await t.callTool("skylight_add_reward_points", { profileIds: ["12"], points: 5 });
+    assert.equal(r.isError, false);
+    assert.equal(t.calls.filter((c) => c.method === "POST").length, 1);
+    await t.close();
+  }
+});

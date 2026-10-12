@@ -463,7 +463,7 @@ test("complete chore rejects an instanceTime that disagrees with the id, before 
 });
 
 test("delete all on a time-suffixed id uses the numeric series path", async () => {
-  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/60913118", status: 204, text: "" }, { method: "DELETE", path: "/api/frames/77/chores/60913118", status: 204, text: "" }]);
+  const t = await connectTestClient([FRAMES, { method: "DELETE", path: "/api/frames/77/chores/60913118", status: 204, text: "" }]);
   const all = await t.callTool("skylight_delete_chore", { choreId: ROUTINE_ID, applyTo: "all", confirm: true });
   assert.equal(all.isError, false);
   assert.equal(t.calls.at(-1)!.url.pathname, "/api/frames/77/chores/60913118");
@@ -761,4 +761,107 @@ test("delete description says routines can only be deleted as a whole", async ()
   const d = (await t.client.listTools()).tools.find((x) => x.name === "skylight_delete_chore")!.description ?? "";
   assert.match(d, /routine steps can only be deleted as a whole series/i);
   await t.close();
+});
+
+test("a categories response with zero profiles never blocks a write (create, update, bulk)", async () => {
+  for (const json of [{ data: [] }, {}]) {
+    const cats: MockRoute = { method: "GET", path: "/api/frames/77/categories", json };
+    const t = await connectTestClient([FRAMES, cats, CREATE, { method: "PUT", path: "/api/frames/77/chores/5", json: { data: chore("5", "x") } }]);
+    assert.equal((await t.callTool("skylight_create_chore", { summary: "x", start: "2026-10-13", profileIds: ["12"] })).isError, false);
+    assert.equal((await t.callTool("skylight_update_chore", { choreId: "5", profileIds: ["12"] })).isError, false);
+    const bulk = await t.callTool("skylight_bulk_create_chores", { chores: [{ summary: "x", start: "2026-10-13", profileIds: ["14"] }] });
+    assert.equal((bulk.data as { created: number }).created, 1);
+    assert.equal(t.calls.filter((c) => c.method === "POST").length, 2);
+    assert.equal(t.calls.filter((c) => c.method === "PUT").length, 1);
+    await t.close();
+  }
+});
+
+test("bulk create with a failed categories lookup still posts every valid item", async () => {
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/categories", status: 500, text: "boom" }, CREATE]);
+  const r = await t.callTool("skylight_bulk_create_chores", { chores: [{ summary: "A", start: "2026-10-13", profileIds: ["14"] }, { summary: "B", start: "2026-10-13", profileIds: ["12"] }] });
+  assert.equal((r.data as { created: number }).created, 2);
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 2);
+  await t.close();
+});
+
+test("invalid create/update input costs no request at all, not even the frame or categories lookup", async () => {
+  const t = await connectTestClient([FRAMES, CATS, CREATE]);
+  const bad = await t.callTool("skylight_create_chore", { summary: "x", start: "2026-13-01", profileIds: ["14"] });
+  assert.match(bad.text, /start/);
+  const bad2 = await t.callTool("skylight_update_chore", { choreId: "5", profileIds: ["14"], startTime: "7:00" });
+  assert.match(bad2.text, /startTime/);
+  assert.equal(t.calls.length, 0);
+  await t.close();
+});
+
+test("list chores breaks same-day ties by instanceTime, then position, then summary (nulls last)", async () => {
+  const row = (id: string, summary: string, start_time: string | null, position: number | null) => ({ id, attributes: { summary, start: "2026-10-12", routine: start_time !== null, start_time, position, recurring: true } });
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [
+    row("9-2026-10-12", "Alpha chore", null, null),
+    row("1-2026-10-12-2000", "Evening", "20:00", 1),
+    row("2-2026-10-12-0600", "Morning B", "06:00", 2),
+    row("3-2026-10-12-0600", "Morning A", "06:00", 1),
+    row("4-2026-10-12-1400", "Afternoon", "14:00", null),
+    row("5-2026-10-12-0600", "Morning Z", "06:00", null),
+    row("8-2026-10-12", "Beta chore", null, 3),
+  ] } }]);
+  const d = (await t.callTool("skylight_list_chores", { after: "2026-10-12", before: "2026-10-12" })).data as Array<{ summary: string }>;
+  assert.deepEqual(d.map((c) => c.summary), ["Morning A", "Morning B", "Morning Z", "Afternoon", "Evening", "Beta chore", "Alpha chore"]);
+  await t.close();
+});
+
+test("update 422s about a routine's missing BYHOUR map to a timeOfDay hint; other 422s pass through", async () => {
+  for (const text of ['{"errors":{"recurrence_set":["cannot be empty for routines"]}}', '{"errors":{"recurrence_set":["must contain exactly one BYHOUR of 6, 14 or 20"]}}']) {
+    const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", status: 422, text }]);
+    const r = await t.callTool("skylight_update_chore", { choreId: "5", recurrence: { frequency: "daily" } });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /timeOfDay: updating a routine step's recurrence also needs timeOfDay: morning, afternoon or evening/);
+    await t.close();
+  }
+  for (const text of ['{"errors":{"recurrence_set":["BYHOUR not allowed for non-routine chores"]}}', '{"errors":{"summary":["is invalid"]}}']) {
+    const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/5", status: 422, text }]);
+    const r = await t.callTool("skylight_update_chore", { choreId: "5", summary: "x" });
+    assert.match(r.text, /422/);
+    await t.close();
+  }
+});
+
+test("delete preview refuses one/future when the lookup shows a routine, even without a time suffix", async () => {
+  const routineRow = { id: "60913118-2026-10-12-0600", attributes: { summary: "Brush", series: "60913118", routine: true, start: "2026-10-12", start_time: "06:00" } };
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [routineRow] } }]);
+  for (const args of [{ choreId: "60913118", instanceDate: "2026-10-12", applyTo: "one" }, { choreId: "60913118-2026-10-12", applyTo: "future" }]) {
+    const r = await t.callTool("skylight_delete_chore", args);
+    assert.equal(r.isError, true);
+    assert.match(r.text, ROUTINE_DELETE_MSG);
+  }
+  const all = await t.callTool("skylight_delete_chore", { choreId: "60913118", applyTo: "all" });
+  assert.equal(all.isError, false);
+  assert.equal((all.data as { wouldDelete: { summary: string } }).wouldDelete.summary, "Brush");
+  assert.ok(!t.calls.some((c) => c.method === "DELETE"));
+  await t.close();
+});
+
+test("delete preview proceeds as before when the lookup finds nothing or fails", async () => {
+  const t1 = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }]);
+  const r1 = await t1.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", applyTo: "one" });
+  assert.equal(r1.isError, false);
+  assert.equal((r1.data as { wouldDelete: { summary: unknown } }).wouldDelete.summary, null);
+  await t1.close();
+  const t2 = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", status: 404, text: "no" }]);
+  assert.equal((await t2.callTool("skylight_delete_chore", { choreId: "5-2026-10-14", applyTo: "one" })).isError, false);
+  await t2.close();
+});
+
+test("bulk tool description says dryRun needs a login and reports label ids", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const d = (await t.client.listTools()).tools.find((x) => x.name === "skylight_bulk_create_chores")!.description ?? "";
+  assert.match(d, /dryRun[^.]*needs a login[^.]*reports labels/);
+  await t.close();
+});
+
+test("planCompletion sends an explicit instanceTime with a plain id", async () => {
+  const { planCompletion } = await import("../../src/tools/chores.js");
+  assert.deepEqual(planCompletion({ choreId: "60913118", instanceDate: "2026-10-12", instanceTime: "06:00" }), { seriesId: "60913118", instanceDate: "2026-10-12", status: "complete", body: { status: "complete", instance_date: "2026-10-12", instance_time: "06:00" } });
+  assert.throws(() => planCompletion({ choreId: "60913118-2026-10-12-0600", instanceTime: "14:00" }), /does not match the time/);
 });

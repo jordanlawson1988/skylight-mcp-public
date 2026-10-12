@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput, type ChoreUpdateInput } from "../skylight/chore-payload.js";
+import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreCreateBody, type ChoreInput, type ChoreUpdateInput } from "../skylight/chore-payload.js";
 import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertId, assertTime, localDateString, parseChoreId } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
@@ -44,8 +44,7 @@ function choresPath(frameId: string): string {
   return `/api/frames/${frameId}/chores`;
 }
 
-async function createOne(ctx: ToolContext, frameId: string, input: ChoreInput): Promise<Chore[]> {
-  const body = buildChoreCreateBody(input);
+async function createOne(ctx: ToolContext, frameId: string, body: ChoreCreateBody): Promise<Chore[]> {
   const json = await ctx.client.request<unknown>({ method: "POST", path: `${choresPath(frameId)}/create_multiple`, body });
   const created = mapChores(json);
   if (created.length > 0) return created;
@@ -61,7 +60,7 @@ function stopReason(e: unknown): string | null {
   return null;
 }
 
-async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: string, seriesId: string, date: string | null): Promise<string | null> {
+async function findChore(ctx: ToolContext, frameId: string, choreId: string, seriesId: string, date: string | null): Promise<{ summary: string; routine: boolean } | null> {
   let after: string;
   let before: string;
   if (date !== null) {
@@ -75,7 +74,7 @@ async function findChoreSummary(ctx: ToolContext, frameId: string, choreId: stri
   try {
     const chores = mapChores(await ctx.client.request({ method: "GET", path: choresPath(frameId), query: { after, before, include_late: false, include_up_for_grabs: true, filter: "linked_to_profile" } }));
     const hit = chores.find((c) => c.id === choreId) ?? chores.find((c) => c.id === seriesId || c.seriesId === seriesId);
-    return hit?.summary ?? null;
+    return hit ? { summary: hit.summary, routine: hit.routine } : null;
   } catch {
     return null;
   }
@@ -145,6 +144,14 @@ export function deletePathId(choreId: string, applyTo: string | undefined, insta
   return { pathId: anchored ? `${ref.seriesId}-${date}` : ref.seriesId, seriesId: ref.seriesId, instanceDate: date, anchored };
 }
 
+/** An update that touches a routine's recurrence without timeOfDay loses the BYHOUR the server requires. */
+function mapUpdateError(e: unknown): unknown {
+  if (e instanceof SkylightApiError && e.status === 422 && (e.message.includes("cannot be empty for routines") || (e.message.includes("BYHOUR") && !e.message.includes("not allowed for non-routine")))) {
+    return new ValidationError("timeOfDay", "updating a routine step's recurrence also needs timeOfDay: morning, afternoon or evening");
+  }
+  return e;
+}
+
 const DELETE_SCOPE_TEXT = {
   all: "every occurrence of this recurring chore",
   future: "this occurrence and all later ones",
@@ -185,7 +192,9 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
           if (kb === null) return -1;
           return ka < kb ? -1 : 1;
         }
-        return a.summary < b.summary ? -1 : a.summary > b.summary ? 1 : 0;
+        // Same day: routine slots in clock order, then Skylight's own step order, then title. Nulls sort last.
+        const byNullsLast = <T extends string | number>(x: T | null, y: T | null): number => (x === y ? 0 : x === null ? 1 : y === null ? -1 : x < y ? -1 : 1);
+        return byNullsLast(a.instanceTime, b.instanceTime) || byNullsLast(a.position, b.position) || byNullsLast(a.summary, b.summary);
       });
     })
   );
@@ -199,9 +208,11 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       annotations: ANNOTATIONS.create,
     },
     (args) => run(async () => {
+      // Build (and so validate) first: invalid input must cost no request. The label guard then checks the validated ids.
+      const body = buildChoreCreateBody(args as ChoreInput);
       const frameId = await ctx.frames.resolve();
-      if (args.profileIds !== undefined) await assertPersonProfiles(ctx, frameId, args.profileIds.map((p) => assertId(p, "profileIds")), "profileIds");
-      const created = await createOne(ctx, frameId, args as ChoreInput);
+      if (body.category_ids.length > 0) await assertPersonProfiles(ctx, frameId, body.category_ids, "profileIds");
+      const created = await createOne(ctx, frameId, body);
       return { created, ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) };
     })
   );
@@ -210,7 +221,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
     "skylight_bulk_create_chores",
     {
       title: "Bulk create chores and routines",
-      description: `Create up to ${MAX_BULK} chores or routine steps in one call. Every item is validated before any request; invalid items are reported without stopping the rest. Use dryRun: true first to show the user exactly what will be created. If some items fail, fix and resend ONLY the failed items; resending the whole batch creates duplicates.`,
+      description: `Create up to ${MAX_BULK} chores or routine steps in one call. Every item is validated before any request; invalid items are reported without stopping the rest. Use dryRun: true first to show the user exactly what will be created; it still needs a login (one profile lookup) and also reports labels such as Birthdays used as profile ids. If some items fail, fix and resend ONLY the failed items; resending the whole batch creates duplicates.`,
       inputSchema: {
         chores: z.array(z.object(choreInputShape)).min(1).max(MAX_BULK),
         dryRun: z.boolean().optional().describe("true validates and returns the payloads without creating anything."),
@@ -242,7 +253,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
         if ("error" in p) { results.push({ index: p.index, summary, ok: false, error: p.error }); continue; }
         if (stop !== null) { results.push({ index: p.index, summary, ok: false, error: `not attempted: ${stop}` }); continue; }
         try {
-          const created = await createOne(ctx, frameId, args.chores[p.index] as ChoreInput);
+          const created = await createOne(ctx, frameId, p.payload);
           results.push({ index: p.index, summary, ok: true, ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) });
         } catch (e) {
           results.push({ index: p.index, summary, ok: false, error: e instanceof Error ? e.message : String(e) });
@@ -282,8 +293,14 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const body: Record<string, unknown> = buildChoreUpdateBody(rest as ChoreUpdateInput);
       if (applyTo !== undefined) body.apply_to = applyTo;
       const frameId = await ctx.frames.resolve();
-      if (rest.profileIds !== undefined) await assertPersonProfiles(ctx, frameId, (rest.profileIds as string[]).map((p) => assertId(p, "profileIds")), "profileIds");
-      const json = await ctx.client.request<unknown>({ method: "PUT", path: `${choresPath(frameId)}/${id}`, body });
+      const newIds = (body as { category_ids?: string[] }).category_ids;
+      if (newIds !== undefined && newIds.length > 0) await assertPersonProfiles(ctx, frameId, newIds, "profileIds");
+      let json: unknown;
+      try {
+        json = await ctx.client.request<unknown>({ method: "PUT", path: `${choresPath(frameId)}/${id}`, body });
+      } catch (e) {
+        throw mapUpdateError(e);
+      }
       return mapChore((json as { data?: unknown })?.data) ?? { id, updated: true };
     })
   );
@@ -307,9 +324,12 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const frameId = await ctx.frames.resolve();
       if (confirm !== true) {
         const scope = DELETE_SCOPE_TEXT[(applyTo as keyof typeof DELETE_SCOPE_TEXT | undefined) ?? "none"];
+        const found = await findChore(ctx, frameId, choreId, seriesId, date);
+        // A routine whose id arrived without a time suffix is still all-or-nothing; unknown (not found / lookup failed) proceeds as before.
+        if (anchored && found?.routine === true) throw new ValidationError("applyTo", ROUTINE_DELETE_MESSAGE);
         return {
           confirmed: false,
-          wouldDelete: { seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null, summary: await findChoreSummary(ctx, frameId, choreId, seriesId, date) },
+          wouldDelete: { seriesId, instanceDate: anchored ? date : null, applyTo: applyTo ?? null, summary: found?.summary ?? null },
           message: `Nothing was deleted. This would delete ${scope}. Ask the user to confirm, then call again with confirm: true.`,
         };
       }
