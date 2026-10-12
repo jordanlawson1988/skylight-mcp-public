@@ -1,18 +1,17 @@
+import { status } from "./cli/commands.js";
+import { loadConfig, type NodeConfig } from "./node/config.js";
 import { createTokenProvider, type TokenProvider } from "./skylight/auth.js";
-import { createClient, type Sleep, type SkylightClient } from "./skylight/client.js";
-import { loadConfig, type SkylightConfig } from "./skylight/config.js";
+import { createClient, type Sleep } from "./skylight/client.js";
 import { createCredentialStore, createKeychainRunner, type CredentialStore, type KeychainRunner } from "./skylight/credentials.js";
-import { createFrameResolver, type FrameResolver } from "./skylight/frame.js";
+import { createFrameResolver } from "./skylight/frame.js";
+import type { ToolContext } from "./tools/context.js";
 
-export interface Runtime {
-  config: SkylightConfig;
+/** The Mac stdio runtime: the shared ToolContext plus the local credential store it is built on. */
+export interface Runtime extends ToolContext {
+  config: NodeConfig;
   store: CredentialStore;
   tokens: TokenProvider;
-  client: SkylightClient;
-  frames: FrameResolver;
   fetch: typeof globalThis.fetch;
-  /** The clock; tools take "today" from this in the configured zone. Injectable for tests. */
-  now: () => Date;
 }
 
 export function assertMacOS(platform: string = process.platform): void {
@@ -26,5 +25,10 @@ export function createRuntime(opts: { env?: NodeJS.ProcessEnv; fetch?: typeof gl
   const tokens = createTokenProvider({ store, fetch, apiBaseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs });
   const client = createClient({ fetch, config, tokens, ...(opts.sleep ? { sleep: opts.sleep } : {}) });
   const frames = createFrameResolver({ client, configuredFrameId: config.frameId });
-  return { config, store, tokens, client, frames, fetch, now: opts.now ?? (() => new Date()) };
+  const rt: Runtime = {
+    config, store, tokens, client, frames, fetch,
+    now: opts.now ?? (() => new Date()),
+    authStatus: () => status(rt),
+  };
+  return rt;
 }

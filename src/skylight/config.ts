@@ -1,15 +1,13 @@
-import { homedir } from "node:os";
-import path from "node:path";
 import { ValidationError } from "./errors.js";
 import { assertId } from "./ids.js";
 import { DEFAULT_TIMEZONE, isValidTimezone } from "./time.js";
 import { TOOLSETS, type Toolset } from "./vocab.js";
 
+/** Settings shared by the Mac stdio server and the Worker. The Mac adds credentialsDir (src/node/config.ts). */
 export interface SkylightConfig {
   apiBaseUrl: string;
   apiVersion: string;
   requestTimeoutMs: number;
-  credentialsDir: string;
   frameId: string | null;
   /** IANA zone every timestamp is presented in and bare datetimes are read in. */
   timezone: string;
@@ -48,7 +46,11 @@ function parseToolsets(raw: string | undefined): { toolsets: Set<Toolset>; expli
   return { toolsets: new Set(names as Toolset[]), explicit: true };
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): SkylightConfig {
+/** The environment variables parseConfig reads; anything else in `env` is ignored. */
+export const CONFIG_ENV_KEYS = ["SKYLIGHT_API_BASE", "SKYLIGHT_REQUEST_TIMEOUT_MS", "SKYLIGHT_FRAME_ID", "SKYLIGHT_TIMEZONE", "SKYLIGHT_TOOLSETS"] as const;
+
+/** Pure: reads the SKYLIGHT_* settings from a plain record (process.env on the Mac, Worker vars remotely). */
+export function parseConfig(env: Readonly<Record<string, string | undefined>>): SkylightConfig {
   const apiBaseUrl = env.SKYLIGHT_API_BASE ? normalizeBase(env.SKYLIGHT_API_BASE) : DEFAULT_API_BASE;
   const timeoutRaw = env.SKYLIGHT_REQUEST_TIMEOUT_MS;
   let requestTimeoutMs = 30000;
@@ -57,11 +59,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SkylightConfig
     requestTimeoutMs = Number(timeoutRaw);
   }
   const frameId = env.SKYLIGHT_FRAME_ID ? assertId(env.SKYLIGHT_FRAME_ID.trim(), "SKYLIGHT_FRAME_ID") : null;
-  const credentialsDir = env.SKYLIGHT_CREDENTIALS_DIR?.trim()
-    || path.join(homedir(), "Library", "Application Support", "skylight-mcp", "credentials");
   const tzRaw = env.SKYLIGHT_TIMEZONE?.trim();
   if (tzRaw && !isValidTimezone(tzRaw)) throw new ValidationError("SKYLIGHT_TIMEZONE", "must be an IANA timezone such as America/New_York");
   const timezone = tzRaw || DEFAULT_TIMEZONE;
   const { toolsets, explicit: toolsetsExplicit } = parseToolsets(env.SKYLIGHT_TOOLSETS);
-  return { apiBaseUrl, apiVersion: DEFAULT_API_VERSION, requestTimeoutMs, credentialsDir, frameId, timezone, timezoneExplicit: Boolean(tzRaw), toolsets, toolsetsExplicit };
+  return { apiBaseUrl, apiVersion: DEFAULT_API_VERSION, requestTimeoutMs, frameId, timezone, timezoneExplicit: Boolean(tzRaw), toolsets, toolsetsExplicit };
 }

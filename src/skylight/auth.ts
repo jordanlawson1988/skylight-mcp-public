@@ -1,4 +1,3 @@
-import type { CredentialStore } from "./credentials.js";
 import { AuthError } from "./errors.js";
 import { refreshCredential, type OAuthCredential } from "./oauth.js";
 
@@ -9,10 +8,17 @@ export interface TokenProvider {
   refreshAfterRejection(rejectedToken: string): Promise<string>;
 }
 
+/** The part of the Mac credential store (src/skylight/credentials.ts) the token provider uses. */
+export interface RefreshableCredentialStore {
+  read(): Promise<OAuthCredential | null>;
+  write(credential: OAuthCredential): Promise<void>;
+  withRefreshLock<T>(fn: () => Promise<T>): Promise<T>;
+}
+
 const NOT_LOGGED_IN = "Not logged in to Skylight. Run `skylight-mcp login` in a terminal.";
 
 export function createTokenProvider(opts: {
-  store: CredentialStore; fetch: typeof globalThis.fetch; apiBaseUrl: string; timeoutMs: number; now?: () => number;
+  store: RefreshableCredentialStore; fetch: typeof globalThis.fetch; apiBaseUrl: string; timeoutMs: number; now?: () => number;
 }): TokenProvider {
   const now = opts.now ?? Date.now;
 

@@ -28,8 +28,12 @@ function retryDelayMs(res: Response): number {
   return raw !== undefined && /^\d+(\.\d+)?$/.test(raw) ? Math.min(Number(raw), RETRY_CAP_SECONDS) * 1000 : RETRY_DEFAULT_MS;
 }
 
-export function createClient(opts: { fetch: typeof globalThis.fetch; config: SkylightConfig; tokens: TokenProvider; sleep?: Sleep }): SkylightClient {
+/** What to tell the user when Skylight keeps rejecting the credential; the shared server names its own login command. */
+export const DEFAULT_RELOGIN_HINT = "Run `skylight-mcp login` again.";
+
+export function createClient(opts: { fetch: typeof globalThis.fetch; config: SkylightConfig; tokens: TokenProvider; sleep?: Sleep; reloginHint?: string }): SkylightClient {
   const { config } = opts;
+  const reloginHint = opts.reloginHint ?? DEFAULT_RELOGIN_HINT;
   const sleep = opts.sleep ?? defaultSleep;
 
   async function send(url: string, init: RequestInit, token: string): Promise<{ res: Response; text: string }> {
@@ -68,7 +72,7 @@ export function createClient(opts: { fetch: typeof globalThis.fetch; config: Sky
         token = await opts.tokens.refreshAfterRejection(token);
         secrets.push(token);
         ({ res, text } = await send(url.toString(), init, token));
-        if (res.status === 401) throw new AuthError("Skylight rejected the credentials after a refresh. Run `skylight-mcp login` again.");
+        if (res.status === 401) throw new AuthError(`Skylight rejected the credentials after a refresh. ${reloginHint}`);
       }
       // Reads are safe to repeat: retry once on 429, 500, 502, 503 or 504. Writes are never retried (they could duplicate).
       if (o.method === "GET" && RETRYABLE_STATUSES.has(res.status)) {

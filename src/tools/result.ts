@@ -24,7 +24,7 @@ export async function run(fn: () => Promise<unknown>): Promise<CallToolResult> {
     if (e instanceof ValidationError) return fail(`Invalid input. ${e.message}`);
     if (e instanceof AuthError) return fail(e.message);
     if (e instanceof SkylightApiError) return fail(e.message);
-    process.stderr.write(`[skylight-mcp] unexpected error: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
+    console.error(`[skylight-mcp] unexpected error: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
     return fail("Unexpected error inside skylight-mcp. See the server log.");
   }
 }

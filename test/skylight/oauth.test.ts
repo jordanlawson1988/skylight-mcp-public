@@ -20,16 +20,18 @@ test("createPendingLogin produces base64url verifier of 43-128 chars and distinc
   assert.equal(a.method, "S256");
 });
 
-test("pkceChallenge S256 is base64url(sha256(verifier))", () => {
+test("pkceChallenge S256 is base64url(sha256(verifier))", async () => {
   const v = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
   const expected = createHash("sha256").update(v).digest("base64url");
-  assert.equal(pkceChallenge(v, "S256"), expected);
-  assert.equal(pkceChallenge(v, "plain"), v);
+  assert.equal(await pkceChallenge(v, "S256"), expected);
+  // RFC 7636 appendix B test vector.
+  assert.equal(await pkceChallenge(v, "S256"), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+  assert.equal(await pkceChallenge(v, "plain"), v);
 });
 
-test("buildAuthorizeUrl includes PKCE, state and device fingerprint", () => {
+test("buildAuthorizeUrl includes PKCE, state and device fingerprint", async () => {
   const p = createPendingLogin();
-  const url = new URL(buildAuthorizeUrl(BASE, p));
+  const url = new URL(await buildAuthorizeUrl(BASE, p));
   assert.equal(url.origin + url.pathname, `${BASE}/oauth/authorize`);
   const q = url.searchParams;
   assert.equal(q.get("client_id"), "skylight-mobile");
@@ -37,7 +39,7 @@ test("buildAuthorizeUrl includes PKCE, state and device fingerprint", () => {
   assert.equal(q.get("redirect_uri"), "https://ourskylight.com/welcome");
   assert.equal(q.get("scope"), "everything");
   assert.equal(q.get("state"), p.state);
-  assert.equal(q.get("code_challenge"), pkceChallenge(p.verifier, "S256"));
+  assert.equal(q.get("code_challenge"), await pkceChallenge(p.verifier, "S256"));
   assert.equal(q.get("code_challenge_method"), "S256");
   assert.equal(q.get("skylight_api_client_device_fingerprint"), p.fingerprint);
 });
@@ -216,4 +218,32 @@ test("refresh failure with an empty body has no double separator", async () => {
     refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: { version: 1, accessToken: "a", refreshToken: "r", fingerprint: "f", expiresAt: 0 } }),
     (e: unknown) => e instanceof AuthError && e.message === "Skylight token refresh failed (502). Run `skylight-mcp login` if this persists."
   );
+});
+
+test("a refresh rejected with 400 or 401 is marked session_expired; other failures are not", async () => {
+  const cred = { version: 1 as const, accessToken: "a", refreshToken: "RT", fingerprint: "f", expiresAt: 0 };
+  for (const status of [400, 401]) {
+    const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status, text: "{}" }]);
+    await assert.rejects(refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: cred }), (e: unknown) => e instanceof AuthError && e.code === "session_expired");
+  }
+  const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status: 503, text: "down" }]);
+  await assert.rejects(refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: cred }), (e: unknown) => e instanceof AuthError && e.code === undefined);
+});
+
+test("refreshCredential names the given login command in its errors", async () => {
+  const cred = { version: 1 as const, accessToken: "a", refreshToken: "RT", fingerprint: "f", expiresAt: 0 };
+  for (const status of [401, 503]) {
+    const { fetch } = createMockFetch([{ method: "POST", path: "/oauth/token", status, text: "{}" }]);
+    await assert.rejects(
+      refreshCredential({ fetch, apiBaseUrl: BASE, timeoutMs: 1000, credential: cred, loginCommand: "skylight-mcp remote login" }),
+      (e: unknown) => e instanceof AuthError && e.message.includes("`skylight-mcp remote login`")
+    );
+  }
+});
+
+test("createPendingLogin uses Web Crypto randomness: a UUID fingerprint and base64url values of the right length", () => {
+  const p = createPendingLogin(0);
+  assert.equal(p.state.length, 43);
+  assert.equal(p.verifier.length, 64);
+  assert.match(p.fingerprint, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
