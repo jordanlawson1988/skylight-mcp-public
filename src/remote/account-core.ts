@@ -269,7 +269,9 @@ export class AccountCore {
 
   // ---- rate limits (fixed windows) ----
 
-  allow(who: string, bucket: RateBucket): Promise<boolean> {
+  /** Charges `cost` calls (a JSON-RPC batch counts each message); refuses, without charging, if that would pass the limit. */
+  allow(who: string, bucket: RateBucket, cost = 1): Promise<boolean> {
+    if (!Number.isSafeInteger(cost) || cost < 1) return Promise.reject(new Error("allow(): cost must be a positive integer"));
     return this.serialized("queue", async () => {
       const { limit, windowMs } = RATE_LIMITS[bucket];
       const key = KEYS.rate(bucket, who.slice(0, 320));
@@ -277,8 +279,8 @@ export class AccountCore {
       const raw = await this.storage.get(key);
       const stored = raw === null ? null : (JSON.parse(raw) as { w: number; n: number });
       const count = stored !== null && stored.w === window ? stored.n : 0;
-      if (count >= limit) return false;
-      await this.storage.put(key, JSON.stringify({ w: window, n: count + 1 }));
+      if (count + cost > limit) return false;
+      await this.storage.put(key, JSON.stringify({ w: window, n: count + cost }));
       return true;
     });
   }
@@ -313,7 +315,7 @@ export interface AccountRpc {
   status(): Promise<AccountStatus>;
   appendAudit(record: AuditRecord): Promise<void>;
   recentAudit(limit: number): Promise<AuditRecord[]>;
-  allow(who: string, bucket: RateBucket): Promise<boolean>;
+  allow(who: string, bucket: RateBucket, cost?: number): Promise<boolean>;
 }
 
 export async function tokenResult(fn: () => Promise<string>): Promise<TokenResult> {
@@ -354,6 +356,6 @@ export function accountRpc(core: AccountCore): AccountRpc {
     status: () => core.status(),
     appendAudit: (r) => core.appendAudit(r),
     recentAudit: (limit) => core.recentAudit(limit),
-    allow: (who, bucket) => core.allow(who, bucket),
+    allow: (who, bucket, cost) => core.allow(who, bucket, cost ?? 1),
   };
 }

@@ -24,10 +24,15 @@ export interface McpHandlerDeps {
   now?: () => Date;
 }
 
+/** A JSON-RPC batch may hold at most this many messages; each one counts toward the person's rate limit. */
+export const MAX_BATCH_MESSAGES = 10;
+/** The SDK transport's own default cap, applied here because the body is read before the transport sees it. */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
 const REMOTE_RELOGIN = `${LOGIN_HINTS.remote.charAt(0).toUpperCase()}${LOGIN_HINTS.remote.slice(1)}.`;
 
-function jsonRpcError(status: number, message: string, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message }, id: null }), {
+function jsonRpcError(status: number, message: string, headers: Record<string, string> = {}, code = -32000): Response {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }), {
     status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers },
   });
 }
@@ -59,8 +64,17 @@ export function createMcpHandler(deps: McpHandlerDeps) {
       try { allowlist = parseAllowlist(env.ALLOWED_EMAILS); } catch { return jsonRpcError(503, "The family server is not fully set up (ALLOWED_EMAILS)."); }
       if (!isAllowed(who.email, true, allowlist)) return jsonRpcError(403, "This Google account is no longer on the family list.");
 
+      const declared = Number(request.headers.get("content-length") ?? "0");
+      if (declared > MAX_BODY_BYTES) return jsonRpcError(413, "The request body is too large.");
+      const text = await request.text();
+      if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return jsonRpcError(413, "The request body is too large.");
+      let body: unknown;
+      try { body = JSON.parse(text); } catch { return jsonRpcError(400, "Parse error: the request body is not JSON.", {}, -32700); }
+      const messages = Array.isArray(body) ? body.length : 1;
+      if (messages > MAX_BATCH_MESSAGES) return jsonRpcError(400, `A batch may hold at most ${MAX_BATCH_MESSAGES} messages.`, {}, -32600);
+
       const account = deps.account(env);
-      if (!(await account.allow(who.email, "mcp"))) {
+      if (!(await account.allow(who.email, "mcp", Math.max(1, messages)))) {
         return jsonRpcError(429, "Too many requests: the family server allows 300 calls per person every 10 minutes. Try again shortly.", { "Retry-After": "600" });
       }
       let config: SkylightConfig;
@@ -85,7 +99,7 @@ export function createMcpHandler(deps: McpHandlerDeps) {
       const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
       await server.connect(transport);
       try {
-        return await transport.handleRequest(request);
+        return await transport.handleRequest(request, { parsedBody: body });
       } finally {
         await server.close();
       }

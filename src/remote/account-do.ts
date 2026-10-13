@@ -34,5 +34,5 @@ export class SkylightAccount extends DurableObject<RemoteEnv> implements Account
   status(): Promise<AccountStatus> { return this.account().status(); }
   appendAudit(record: AuditRecord): Promise<void> { return this.account().appendAudit(record); }
   recentAudit(limit: number): Promise<AuditRecord[]> { return this.account().recentAudit(limit); }
-  allow(who: string, bucket: RateBucket): Promise<boolean> { return this.account().allow(who, bucket); }
+  allow(who: string, bucket: RateBucket, cost?: number): Promise<boolean> { return this.account().allow(who, bucket, cost ?? 1); }
 }
