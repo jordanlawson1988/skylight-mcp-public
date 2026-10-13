@@ -1,10 +1,14 @@
 #!/usr/bin/env node
+import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { formatHuman } from "./skylight/time.js";
 import { completeLogin, logout, startLogin, status } from "./cli/commands.js";
 import { doctor } from "./cli/doctor.js";
 import { runLoginPrompt, type LoginFlowIo } from "./cli/login-flow.js";
+import { createWranglerRunner, REMOTE_USAGE, runRemote } from "./cli/remote.js";
+import { appSupportDir } from "./node/config.js";
+import { createKeychainRunner } from "./skylight/credentials.js";
 import { assertMacOS, createRuntime } from "./runtime.js";
 import { VERSION } from "./version.js";
 
@@ -16,7 +20,8 @@ Usage:
   skylight-mcp logout                                        Remove the stored credential
   skylight-mcp status                                        Show login and frame status (no secrets)
   skylight-mcp doctor                                        Check setup and print Claude Desktop config
-`;
+
+${REMOTE_USAGE}`;
 
 function arg(argv: string[], name: string): string | undefined {
   const i = argv.indexOf(name);
@@ -69,6 +74,16 @@ async function main(argv: string[]): Promise<number> {
       }
       stdout.write(loggedInMessage(result.expiresAt, rt.config.timezone));
       return 0;
+    } finally {
+      prompter.close();
+    }
+  }
+  if (cmd === "remote") {
+    const prompter = openPrompter();
+    try {
+      return await runRemote(argv.slice(1), {
+        rt, runner: createKeychainRunner(), wrangler: createWranglerRunner(), configPath: path.join(appSupportDir(), "remote.json"), io: prompter.io,
+      });
     } finally {
       prompter.close();
     }
