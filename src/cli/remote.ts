@@ -8,7 +8,7 @@ import { isPlainEmail } from "../remote/identity.js";
 import type { Runtime } from "../runtime.js";
 import type { KeychainRunner } from "../skylight/credentials.js";
 import { AuthError } from "../skylight/errors.js";
-import type { OAuthCredential, PkceMethod } from "../skylight/oauth.js";
+import { REMOTE_LOGIN_COMMAND, type OAuthCredential, type PkceMethod } from "../skylight/oauth.js";
 import { excerpt } from "../skylight/redact.js";
 import { formatHuman } from "../skylight/time.js";
 import { exchangeLogin, startLogin, type CompleteLogin } from "./commands.js";
@@ -220,11 +220,11 @@ export async function remoteLogin(deps: RemoteDeps, args: RemoteArgs): Promise<b
   const { url } = await startLogin(deps.rt, { method: args.pkce });
   deps.io.write(`\nThis signs the shared ${args.env} server in to Skylight with its own sign-in (this Mac's login is not changed).\n\n1. Open this link in Chrome and sign in to Skylight:\n\n   ${url}\n\n2. Skylight then bounces you to its home page. That's fine: come back here.\n\n3. Press Enter to finish (reads the sign-in result from Chrome's history),\n   or paste the https://ourskylight.com/welcome?code=... address:\n\n`);
   const complete: CompleteLogin = async (rt, callbackUrl) => {
-    const credential = await exchangeLogin(rt, callbackUrl);
+    const credential = await exchangeLogin(rt, callbackUrl, REMOTE_LOGIN_COMMAND);
     await putCredential(deps, args.env, credential);
     return { expiresAt: credential.expiresAt };
   };
-  const result = await runLoginPrompt(deps.rt, deps.io, deps.find, complete);
+  const result = await runLoginPrompt(deps.rt, deps.io, deps.find, complete, REMOTE_LOGIN_COMMAND);
   if (result.status === "quit") {
     deps.io.write("Not finished. The shared server's Skylight sign-in was not changed.\n");
     return false;

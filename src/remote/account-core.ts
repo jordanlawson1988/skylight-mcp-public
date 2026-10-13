@@ -2,7 +2,7 @@ import { EXPIRY_SKEW_MS } from "../skylight/auth.js";
 import type { SkylightConfig } from "../skylight/config.js";
 import { base64ToBytes, bytesToBase64, randomBytes, utf8 } from "../skylight/encoding.js";
 import { AuthError } from "../skylight/errors.js";
-import { REFRESH_TIMEOUT_MS, refreshCredential, type OAuthCredential } from "../skylight/oauth.js";
+import { REFRESH_TIMEOUT_MS, REMOTE_LOGIN_COMMAND, refreshCredential, type OAuthCredential } from "../skylight/oauth.js";
 import { auditError, auditTargets } from "../tools/audit.js";
 import type { AuditEntry } from "../tools/context.js";
 
@@ -51,7 +51,7 @@ export const RATE_LIMITS: Readonly<Record<RateBucket, { limit: number; windowMs:
 export const AUDIT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 /** A ceiling on top of the 90 days, so a runaway client cannot grow storage without bound. */
 export const AUDIT_MAX_ENTRIES = 5000;
-export const REMOTE_LOGIN_COMMAND = "skylight-mcp remote login";
+export { REMOTE_LOGIN_COMMAND };
 
 export const ACCOUNT_MESSAGES = {
   notSignedIn: "The shared server is not signed in to Skylight. Jordan needs to run `skylight-mcp remote login`.",

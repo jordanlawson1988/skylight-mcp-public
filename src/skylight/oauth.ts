@@ -8,6 +8,8 @@ export const SCOPE = "everything";
 export const PENDING_LOGIN_TTL_MS = 600_000;
 /** The command that signs this machine in again; the shared server passes `skylight-mcp remote login`. */
 export const DEFAULT_LOGIN_COMMAND = "skylight-mcp login";
+/** The command that signs the shared server in to Skylight. */
+export const REMOTE_LOGIN_COMMAND = "skylight-mcp remote login";
 /**
  * How long a token refresh may take, separate from SKYLIGHT_REQUEST_TIMEOUT_MS: Skylight rotates the refresh token, so
  * abandoning a refresh it already answered would lose the new token and with it the sign-in. Generous on purpose.
@@ -77,9 +79,9 @@ function safeEqual(a: string, b: string): boolean {
   return bytesEqual(utf8(a), utf8(b));
 }
 
-export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now: number = Date.now()): { code: string } {
+export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now: number = Date.now(), loginCommand: string = DEFAULT_LOGIN_COMMAND): { code: string } {
   if (now - pending.createdAt > PENDING_LOGIN_TTL_MS) {
-    throw new AuthError("The login attempt expired. Run `skylight-mcp login` again.");
+    throw new AuthError(`The login attempt expired. Run \`${loginCommand}\` again.`);
   }
   let url: URL;
   try {
@@ -97,7 +99,7 @@ export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now
   const state = url.searchParams.get("state");
   if (!code || !state) throw new AuthError("Callback URL is missing code or state.");
   if (!safeEqual(state, pending.state)) {
-    throw new AuthError("Callback state does not match this login attempt. Run `skylight-mcp login` again.");
+    throw new AuthError(`Callback state does not match this login attempt. Run \`${loginCommand}\` again.`);
   }
   if (!/^[A-Za-z0-9._~-]{1,512}$/.test(code)) throw new AuthError("Callback code has an unexpected format.");
   return { code };

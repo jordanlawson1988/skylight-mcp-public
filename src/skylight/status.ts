@@ -1,6 +1,7 @@
 import type { SkylightConfig } from "./config.js";
 import { AuthError } from "./errors.js";
 import type { FrameResolver } from "./frame.js";
+import { DEFAULT_LOGIN_COMMAND, REMOTE_LOGIN_COMMAND } from "./oauth.js";
 import { formatHuman, formatOffsetDateTime } from "./time.js";
 
 /** What skylight_auth_status reports. Never contains a token. */
@@ -24,8 +25,8 @@ export interface AuthStatusReport {
 
 /** The sign-in instruction for each way the tools run. */
 export const LOGIN_HINTS = {
-  stdio: "run `skylight-mcp login` in a terminal on the Mac",
-  remote: "Jordan needs to run `skylight-mcp remote login`",
+  stdio: `run \`${DEFAULT_LOGIN_COMMAND}\` in a terminal on the Mac`,
+  remote: `Jordan needs to run \`${REMOTE_LOGIN_COMMAND}\``,
 } as const;
 
 /** Frame errors that mean the credential itself is dead (so a new sign-in is the fix). */
