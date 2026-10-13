@@ -1,14 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreCreateBody, type ChoreInput, type ChoreUpdateInput } from "../skylight/chore-payload.js";
-import { AuthError, SkylightApiError, ValidationError } from "../skylight/errors.js";
-import { assertDate, assertId, assertTime, localDateString, parseChoreId } from "../skylight/ids.js";
+import { SkylightApiError, ValidationError } from "../skylight/errors.js";
+import { assertDate, assertId, assertTime, parseChoreId } from "../skylight/ids.js";
 import { FREQUENCIES, WEEKDAYS } from "../skylight/rrule.js";
 import { mapChore, mapChores, type Chore } from "../skylight/types.js";
+import { addDays, formatOffsetDateTime, todayIn } from "../skylight/time.js";
 import { CHORE_STATUS, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, ROUTINE_SLOT_NAMES } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { personProfileProblems, assertPersonProfiles } from "./profiles.js";
-import { ANNOTATIONS, run } from "./result.js";
+import { ANNOTATIONS, run, stopReason } from "./result.js";
 
 export const MAX_BULK = 50;
 
@@ -54,22 +55,14 @@ async function createOne(ctx: ToolContext, frameId: string, body: ChoreCreateBod
 
 const NO_IDS_WARNING = "Skylight returned no chore ids; list chores to confirm.";
 
-function stopReason(e: unknown): string | null {
-  if (e instanceof AuthError) return "authentication failed";
-  if (e instanceof SkylightApiError && e.status === 429) return "rate limited by Skylight";
-  return null;
-}
-
 async function findChore(ctx: ToolContext, frameId: string, choreId: string, seriesId: string, date: string | null): Promise<{ summary: string; routine: boolean } | null> {
   let after: string;
   let before: string;
   if (date !== null) {
     after = date; before = date;
   } else {
-    const now = new Date();
-    const lo = new Date(now); lo.setDate(lo.getDate() - 30);
-    const hi = new Date(now); hi.setDate(hi.getDate() + 60);
-    after = localDateString(lo); before = localDateString(hi);
+    const today = todayIn(ctx.config.timezone, ctx.now());
+    after = addDays(today, -30); before = addDays(today, 60);
   }
   try {
     const chores = mapChores(await ctx.client.request({ method: "GET", path: choresPath(frameId), query: { after, before, include_late: false, include_up_for_grabs: true, filter: "linked_to_profile" } }));
@@ -152,6 +145,13 @@ function mapUpdateError(e: unknown): unknown {
   return e;
 }
 
+/** Series id of any chore id form; the move endpoint only takes numeric ids. */
+function numericSeriesId(value: string, field: string): string {
+  const { seriesId } = parseChoreId(value, field);
+  if (!/^\d+$/.test(seriesId)) throw new ValidationError(field, "must be a numeric chore id as returned by skylight_list_chores");
+  return seriesId;
+}
+
 const DELETE_SCOPE_TEXT = {
   all: "every occurrence of this recurring chore",
   future: "this occurrence and all later ones",
@@ -159,7 +159,11 @@ const DELETE_SCOPE_TEXT = {
   none: "this chore",
 } as const;
 
+/** A chore for display: completedAt in the configured zone. */
+export const presentChore = <T extends { completedAt: string | null }>(c: T, tz: string): T => (c.completedAt === null ? c : { ...c, completedAt: formatOffsetDateTime(c.completedAt, tz) });
+
 export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
+  const tz = ctx.config.timezone;
   server.registerTool(
     "skylight_list_chores",
     {
@@ -174,9 +178,9 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       annotations: ANNOTATIONS.read,
     },
     (args) => run(async () => {
-      const today = localDateString();
+      const today = todayIn(tz, ctx.now());
       const after = assertDate(args.after ?? today, "after");
-      const before = assertDate(args.before ?? new Date(Date.parse(`${after}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10), "before");
+      const before = assertDate(args.before ?? addDays(after, 14), "before");
       if (after > before) throw new ValidationError("after", "must not be later than before");
       const frameId = await ctx.frames.resolve();
       const chores = mapChores(await ctx.client.request({
@@ -185,7 +189,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       }));
       // One-time chores have no instanceDate; fall back to their start date so they sort with the rest.
       const key = (c: Chore) => c.instanceDate ?? c.start;
-      return chores.sort((a, b) => {
+      return chores.map((c) => presentChore(c, tz)).sort((a, b) => {
         const ka = key(a), kb = key(b);
         if (ka !== kb) {
           if (ka === null) return 1;
@@ -213,7 +217,7 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       const frameId = await ctx.frames.resolve();
       if (body.category_ids.length > 0) await assertPersonProfiles(ctx, frameId, body.category_ids, "profileIds");
       const created = await createOne(ctx, frameId, body);
-      return { created, ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) };
+      return { created: created.map((c) => presentChore(c, tz)), ids: created.map((c) => c.id), ...(created.length === 0 ? { warning: NO_IDS_WARNING } : {}) };
     })
   );
 
@@ -301,7 +305,8 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       } catch (e) {
         throw mapUpdateError(e);
       }
-      return mapChore((json as { data?: unknown })?.data) ?? { id, updated: true };
+      const updated = mapChore((json as { data?: unknown })?.data);
+      return updated ? presentChore(updated, tz) : { id, updated: true };
     })
   );
 
@@ -365,7 +370,32 @@ export function registerChoreTools(server: McpServer, ctx: ToolContext): void {
       } catch (e) {
         throw mapCompletionError(e);
       }
-      return { seriesId, instanceDate, status, chore: mapChore((json as { data?: unknown })?.data) };
+      const done = mapChore((json as { data?: unknown })?.data);
+      return { seriesId, instanceDate, status, chore: done ? presentChore(done, tz) : null };
+    })
+  );
+
+  server.registerTool(
+    "skylight_move_routine_step",
+    {
+      title: "Reorder a routine step",
+      description: "Move a routine step before or after another step, which changes the `position` that skylight_list_chores reports and the order the steps show in the routine. Pass exactly one of beforeChoreId or afterChoreId. Ids may be passed exactly as returned by skylight_list_chores (the series id is used). Moving is idempotent: repeating it leaves the same order.",
+      inputSchema: {
+        choreId: z.string().describe("The step to move: chore id as returned by skylight_list_chores."),
+        beforeChoreId: z.string().optional().describe("Place the step immediately before this step."),
+        afterChoreId: z.string().optional().describe("Place the step immediately after this step."),
+      },
+      annotations: ANNOTATIONS.update,
+    },
+    (args) => run(async () => {
+      if ((args.beforeChoreId === undefined) === (args.afterChoreId === undefined)) throw new ValidationError("beforeChoreId", "pass exactly one of beforeChoreId or afterChoreId");
+      const position = args.beforeChoreId !== undefined ? "before" : "after";
+      const seriesId = numericSeriesId(args.choreId, "choreId");
+      const relativeTo = numericSeriesId((args.beforeChoreId ?? args.afterChoreId)!, position === "before" ? "beforeChoreId" : "afterChoreId");
+      if (relativeTo === seriesId) throw new ValidationError(position === "before" ? "beforeChoreId" : "afterChoreId", "must be a different step than choreId");
+      const frameId = await ctx.frames.resolve();
+      await ctx.client.request({ method: "POST", path: `${choresPath(frameId)}/${seriesId}/move`, body: { position: { [position]: Number(relativeTo) } } });
+      return { moved: true, seriesId, position, relativeTo };
     })
   );
 }

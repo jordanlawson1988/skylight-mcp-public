@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
+import { formatHuman } from "./skylight/time.js";
 import { completeLogin, logout, startLogin, status } from "./cli/commands.js";
 import { doctor } from "./cli/doctor.js";
 import { runLoginPrompt, type LoginFlowIo } from "./cli/login-flow.js";
@@ -22,8 +23,8 @@ function arg(argv: string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
-function loggedInMessage(expiresAt: number): string {
-  return `\nLogged in. Access token valid until ${new Date(expiresAt).toLocaleString()}.\nRun \`skylight-mcp doctor\` to finish setup.\n`;
+function loggedInMessage(expiresAt: number, tz: string): string {
+  return `\nLogged in. Access token valid until ${formatHuman(new Date(expiresAt).toISOString(), tz)}.\nRun \`skylight-mcp doctor\` to finish setup.\n`;
 }
 
 /** One readline interface for the whole login so piped input is not lost between prompts. */
@@ -53,7 +54,7 @@ async function main(argv: string[]): Promise<number> {
     if (argv.includes("--complete")) {
       if (!completeUrl) throw new Error("--complete needs the full callback URL.");
       const { expiresAt } = await completeLogin(rt, completeUrl);
-      stdout.write(loggedInMessage(expiresAt));
+      stdout.write(loggedInMessage(expiresAt, rt.config.timezone));
       return 0;
     }
     const method = arg(argv, "--pkce") === "plain" ? "plain" : "S256";
@@ -66,7 +67,7 @@ async function main(argv: string[]): Promise<number> {
         stdout.write("Login not finished. The pending login stays valid for 10 minutes; run `skylight-mcp login --complete <url>` to finish it.\n");
         return 1;
       }
-      stdout.write(loggedInMessage(result.expiresAt));
+      stdout.write(loggedInMessage(result.expiresAt, rt.config.timezone));
       return 0;
     } finally {
       prompter.close();

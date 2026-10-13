@@ -28,3 +28,10 @@ export async function run(fn: () => Promise<unknown>): Promise<CallToolResult> {
     return fail("Unexpected error inside skylight-mcp. See the server log.");
   }
 }
+
+/** Why a bulk loop should stop trying further items (login rejected, rate limited), or null to keep going. */
+export function stopReason(e: unknown): string | null {
+  if (e instanceof AuthError) return "authentication failed";
+  if (e instanceof SkylightApiError && e.status === 429) return "rate limited by Skylight";
+  return null;
+}

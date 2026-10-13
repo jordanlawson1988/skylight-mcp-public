@@ -865,3 +865,78 @@ test("planCompletion sends an explicit instanceTime with a plain id", async () =
   assert.deepEqual(planCompletion({ choreId: "60913118", instanceDate: "2026-10-12", instanceTime: "06:00" }), { seriesId: "60913118", instanceDate: "2026-10-12", status: "complete", body: { status: "complete", instance_date: "2026-10-12", instance_time: "06:00" } });
   assert.throws(() => planCompletion({ choreId: "60913118-2026-10-12-0600", instanceTime: "14:00" }), /does not match the time/);
 });
+
+test("move routine step before another sends position.before with numeric series ids", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/60913118/move", json: {} }]);
+  const r = await t.callTool("skylight_move_routine_step", { choreId: "60913118-2026-10-12-0600", beforeChoreId: "60913117-2026-10-12-0600" });
+  assert.equal(r.isError, false);
+  const post = t.calls.filter((c) => c.method === "POST");
+  assert.equal(post.length, 1);
+  assert.equal(post[0]!.url.pathname, "/api/frames/77/chores/60913118/move");
+  assert.deepEqual(post[0]!.body, { position: { before: 60913117 } });
+  assert.deepEqual(r.data, { moved: true, seriesId: "60913118", position: "before", relativeTo: "60913117" });
+  await t.close();
+});
+
+test("move routine step after another sends position.after", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: "/api/frames/77/chores/5/move", json: null }]);
+  const r = await t.callTool("skylight_move_routine_step", { choreId: "5", afterChoreId: "6" });
+  assert.equal(r.isError, false);
+  assert.deepEqual(t.calls.at(-1)!.body, { position: { after: 6 } });
+  assert.deepEqual(r.data, { moved: true, seriesId: "5", position: "after", relativeTo: "6" });
+  await t.close();
+});
+
+test("move routine step needs exactly one anchor, two different steps and valid ids, before any request", async () => {
+  const t = await connectTestClient([FRAMES, { method: "POST", path: /\/move$/, json: {} }]);
+  for (const args of [
+    { choreId: "5" },
+    { choreId: "5", beforeChoreId: "6", afterChoreId: "7" },
+    { choreId: "5", beforeChoreId: "5" },
+    { choreId: "5-2026-10-12-0600", afterChoreId: "5-2026-10-13-0600" },
+    { choreId: "../5", beforeChoreId: "6" },
+    { choreId: "5", beforeChoreId: "a/b" },
+    { choreId: "abc", beforeChoreId: "6" },
+  ]) {
+    assert.equal((await t.callTool("skylight_move_routine_step", args)).isError, true, JSON.stringify(args));
+  }
+  assert.equal(t.calls.filter((c) => c.method === "POST").length, 0);
+  await t.close();
+});
+
+test("move routine step is annotated idempotent update", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const tool = (await t.client.listTools()).tools.find((x) => x.name === "skylight_move_routine_step")!;
+  assert.equal(tool.annotations?.idempotentHint, true);
+  assert.match(tool.description ?? "", /position/);
+  await t.close();
+});
+
+test("list chores shows completedAt in Eastern time", async () => {
+  const done = { ...chore("9", "Walk dog"), attributes: { summary: "Walk dog", start: "2026-10-13", completed_at: "2026-08-27T16:00:00.000Z" } };
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [done, chore("10", "Open")] } }]);
+  const d = (await t.callTool("skylight_list_chores", { after: "2026-10-01", before: "2026-10-31" })).data as Array<{ id: string; completedAt: string | null }>;
+  assert.equal(d.find((c) => c.id === "9")!.completedAt, "2026-08-27T12:00:00-04:00");
+  assert.equal(d.find((c) => c.id === "10")!.completedAt, null);
+  await t.close();
+});
+
+test("complete chore shows the returned completedAt in Eastern time", async () => {
+  const done = { ...chore("9", "Walk dog"), attributes: { summary: "Walk dog", start: "2026-10-13", completed_at: "2026-01-27T16:00:00Z" } };
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: "/api/frames/77/chores/9/completions", json: { data: done } }]);
+  const d = (await t.callTool("skylight_complete_chore", { choreId: "9" })).data as { chore: { completedAt: string } };
+  assert.equal(d.chore.completedAt, "2026-01-27T11:00:00-05:00");
+  await t.close();
+});
+
+test("list chores and the delete preview default to the configured zone's today", async () => {
+  const now = () => new Date("2026-10-12T23:30:00Z"); // Oct 13 in Auckland, Oct 12 in UTC and New York
+  const t = await connectTestClient([FRAMES, { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }], { env: { SKYLIGHT_TIMEZONE: "Pacific/Auckland" }, now });
+  await t.callTool("skylight_list_chores");
+  let q = t.calls.at(-1)!.url.searchParams;
+  assert.deepEqual([q.get("after"), q.get("before")], ["2026-10-13", "2026-10-27"]);
+  await t.callTool("skylight_delete_chore", { choreId: "123" });
+  q = t.calls.at(-1)!.url.searchParams;
+  assert.deepEqual([q.get("after"), q.get("before")], ["2026-09-13", "2026-12-12"]);
+  await t.close();
+});

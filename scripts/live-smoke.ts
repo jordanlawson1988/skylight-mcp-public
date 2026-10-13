@@ -1,13 +1,16 @@
 // Opt-in live checks against the real Skylight API using the stored credential.
+// Phase 2 (rewards, routine reorder, lists, events) lives in live-smoke-phase2.ts and runs after the write leg below; phase 3 (meals and recipes, albums and captions, device settings, frame) lives in live-smoke-phase3.ts and runs after phase 2.
 // Read-only by default (also fails if balances or reward costs map to nothing). SKYLIGHT_LIVE_WRITE=1 also exercises one-time and recurring chores end to end (create, update, complete, revert, delete one/all), recurrence variants, a morning routine step (BYHOUR, time-suffixed ids, no single-occurrence delete), an up-for-grabs chore, clearing fields with null, then a profile (create, update, assign a chore, delete, verify gone).
 import { createRuntime, assertMacOS, type Runtime } from "../src/runtime.js";
 import { listProfiles } from "../src/tools/profiles.js";
 import { mapChore, mapChores, mapProfile, mapProfiles, mapRewardPoints, mapRewards } from "../src/skylight/types.js";
 import { buildChoreCreateBody, buildChoreUpdateBody, type ChoreInput } from "../src/skylight/chore-payload.js";
 import { buildProfileCreateBody, buildProfileUpdateBody } from "../src/skylight/profile-payload.js";
-import { localDateString } from "../src/skylight/ids.js";
+import { addDays, todayIn } from "../src/skylight/time.js";
 import { CHORE_STATUS, ROUTINE_SLOTS } from "../src/skylight/vocab.js";
 import { deletePathId, planCompletion } from "../src/tools/chores.js";
+import { phase2Smoke } from "./live-smoke-phase2.js";
+import { phase3Smoke } from "./live-smoke-phase3.js";
 
 async function main() {
   assertMacOS();
@@ -16,7 +19,7 @@ async function main() {
   console.log("frame", frameId);
   const profiles = await listProfiles(rt);
   console.log("profiles", profiles.map((p) => `${p.name}:${p.id}`).join(", "));
-  const today = localDateString();
+  const today = todayIn(rt.config.timezone, rt.now());
   const chores = mapChores(await rt.client.request({ method: "GET", path: `/api/frames/${frameId}/chores`, query: { after: today, before: today, include_late: true, include_up_for_grabs: true, filter: "linked_to_profile" } }));
   console.log("chores today", chores.length);
   const rawPoints = await rt.client.request<unknown>({ method: "GET", path: `/api/frames/${frameId}/reward_points` });
@@ -39,13 +42,11 @@ async function main() {
   if (!profile) throw new Error("no profile to assign to");
   console.log("using profile", `${profile.name}:${profile.id}`);
   await writeSmoke(rt, frameId, profile.id, today);
+  await phase2Smoke(rt, frameId, today);
+  await phase3Smoke(rt, frameId, today);
 }
 
 const PREFIX = "[skylight-mcp smoke]";
-
-function addDays(date: string, n: number): string {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-}
 
 async function writeSmoke(rt: Runtime, frameId: string, profileId: string, today: string): Promise<void> {
   const base = `/api/frames/${frameId}/chores`;

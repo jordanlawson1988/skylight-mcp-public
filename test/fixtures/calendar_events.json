@@ -1,0 +1,171 @@
+{
+  "data": [
+    {
+      "id": "11019657225",
+      "type": "calendar_event",
+      "attributes": {
+        "uid": "uid-0",
+        "summary": "Event 1",
+        "invited_emails": [],
+        "status": "approved",
+        "all_day": true,
+        "timezone": null,
+        "starts_at": "2026-10-08T00:00:00.000Z",
+        "ends_at": "2026-10-13T00:00:00.000Z",
+        "recurring": false,
+        "recurring_config": false,
+        "rrule": null,
+        "master_event_id": null,
+        "description": null,
+        "location": null,
+        "lat": null,
+        "lng": null,
+        "source": "google",
+        "kind": "standard",
+        "editable": true,
+        "countdown_enabled": false,
+        "emoji_icon": null,
+        "owner_email": "user@example.invalid",
+        "calendar_id": "user@example.invalid",
+        "supports_notification_settings": false
+      },
+      "relationships": {
+        "category": {
+          "data": {
+            "id": "14515614",
+            "type": "category"
+          }
+        },
+        "event_notification_setting": {
+          "data": null
+        },
+        "calendar_account": {
+          "data": {
+            "id": "1692235",
+            "type": "calendar_account"
+          }
+        }
+      }
+    },
+    {
+      "id": "13274086104",
+      "type": "calendar_event",
+      "attributes": {
+        "uid": "uid-1",
+        "summary": "Event 2",
+        "invited_emails": [],
+        "status": "approved",
+        "all_day": false,
+        "timezone": null,
+        "starts_at": "2026-10-12T20:00:00.000Z",
+        "ends_at": "2026-10-12T20:15:00.000Z",
+        "recurring": false,
+        "recurring_config": false,
+        "rrule": null,
+        "master_event_id": null,
+        "description": "Details",
+        "location": null,
+        "lat": null,
+        "lng": null,
+        "source": "google",
+        "kind": "standard",
+        "editable": true,
+        "countdown_enabled": false,
+        "emoji_icon": null,
+        "owner_email": "user@example.invalid",
+        "calendar_id": "user@example.invalid",
+        "supports_notification_settings": false
+      },
+      "relationships": {
+        "category": {
+          "data": {
+            "id": "14515614",
+            "type": "category"
+          }
+        },
+        "event_notification_setting": {
+          "data": null
+        },
+        "calendar_account": {
+          "data": {
+            "id": "1692235",
+            "type": "calendar_account"
+          }
+        }
+      }
+    },
+    {
+      "id": "11019627806-1791803100",
+      "type": "calendar_event",
+      "attributes": {
+        "uid": "uid-2",
+        "summary": "Event 3",
+        "invited_emails": [],
+        "status": "approved",
+        "all_day": false,
+        "timezone": "America/New_York",
+        "starts_at": "2026-10-12T11:05:00.000Z",
+        "ends_at": "2026-10-12T11:50:00.000Z",
+        "recurring": true,
+        "recurring_config": true,
+        "rrule": [
+          "RRULE:FREQ=WEEKLY;WKST=SU;INTERVAL=1;BYDAY=MO,FR"
+        ],
+        "master_event_id": null,
+        "description": null,
+        "location": null,
+        "lat": null,
+        "lng": null,
+        "source": "google",
+        "kind": "standard",
+        "editable": true,
+        "countdown_enabled": false,
+        "emoji_icon": null,
+        "owner_email": "user@example.invalid",
+        "calendar_id": "user@example.invalid",
+        "supports_notification_settings": false
+      },
+      "relationships": {
+        "category": {
+          "data": {
+            "id": "15057920",
+            "type": "category"
+          }
+        },
+        "event_notification_setting": {
+          "data": null
+        },
+        "calendar_account": {
+          "data": {
+            "id": "1692235",
+            "type": "calendar_account"
+          }
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "id": "14515614",
+      "type": "category",
+      "attributes": {
+        "id": 14515614,
+        "color": "#CB434C",
+        "label": "Person",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true
+      }
+    },
+    {
+      "id": "15057920",
+      "type": "category",
+      "attributes": {
+        "id": 15057920,
+        "color": "#93D1E6",
+        "label": "Person",
+        "selected_for_chore_chart": true,
+        "linked_to_profile": true
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertId, assertDate, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, assertEmoji, assertPoints, localDateString } from "../../src/skylight/ids.js";
+import { assertId, assertDate, parseEventId, parseChoreId, COMPOSITE_CHORE_ID, assertTime, cleanText, cleanParagraph, sameNumericId, assertEmail, assertEmails, assertEmoji, assertPoints } from "../../src/skylight/ids.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 
 test("assertId accepts simple ids and numbers", () => {
@@ -48,11 +48,6 @@ test("assertPoints bounds integers", () => {
   assert.throws(() => assertPoints(10001, "p"), ValidationError);
 });
 
-test("localDateString uses local calendar fields, zero-padded", () => {
-  assert.equal(localDateString(new Date(2026, 0, 31, 23, 30)), "2026-01-31");
-  assert.equal(localDateString(new Date(2026, 11, 1, 0, 5)), "2026-12-01");
-});
-
 test("parseChoreId splits composite ids and passes plain ids through", () => {
   assert.deepEqual(parseChoreId("111881467", "choreId"), { seriesId: "111881467", instanceDate: null, instanceTime: null });
   assert.deepEqual(parseChoreId(111881467, "choreId"), { seriesId: "111881467", instanceDate: null, instanceTime: null });
@@ -78,4 +73,50 @@ test("parseChoreId rejects impossible times and leaves malformed suffixes as pla
   assert.throws(() => parseChoreId("5-2026-10-12-2500", "choreId"), (e: unknown) => e instanceof ValidationError && e.field === "choreId");
   assert.throws(() => parseChoreId("5-2026-10-12-0660", "choreId"), ValidationError);
   assert.deepEqual(parseChoreId("5-2026-10-12-06", "choreId"), { seriesId: "5-2026-10-12-06", instanceDate: null, instanceTime: null });
+});
+
+test("parseEventId splits composite occurrence ids and passes master ids through", () => {
+  assert.deepEqual(parseEventId("11019627806", "eventId"), { masterId: "11019627806", occurrence: null });
+  assert.deepEqual(parseEventId(11019627806, "eventId"), { masterId: "11019627806", occurrence: null });
+  assert.deepEqual(parseEventId("11019627806-1791803100", "eventId"), { masterId: "11019627806", occurrence: 1791803100 });
+});
+
+test("parseEventId rejects anything that is not <digits> or <digits>-<digits>", () => {
+  for (const bad of ["", "abc", "12-", "-12", "12-34-56", "12-ab", "../1", "1/2", "12-2026-10-12"]) {
+    assert.throws(() => parseEventId(bad, "eventId"), (e: unknown) => e instanceof ValidationError && e.field === "eventId", bad);
+  }
+});
+
+test("cleanParagraph keeps newlines and tabs, normalizes CRLF, and still rejects other control characters", () => {
+  assert.equal(cleanParagraph("  Ingredients:\r\n- a\n\nInstructions:\n1. x\n  ", "d", 500), "Ingredients:\n- a\n\nInstructions:\n1. x");
+  assert.equal(cleanParagraph("a\tb", "d", 10), "a\tb");
+  assert.throws(() => cleanParagraph("a\u0000b", "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("a\u001bb", "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("  \n ", "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("x".repeat(11), "d", 10), ValidationError);
+  assert.throws(() => cleanParagraph("\ud800", "d", 10), ValidationError);
+});
+
+test("assertEmail accepts ordinary addresses (lower-cased) and rejects the rest", () => {
+  assert.equal(assertEmail("  Mom.Smith+skylight@Example.COM ", "email"), "mom.smith+skylight@example.com");
+  for (const bad of ["", "plain", "a@b", "a@b.c", "a b@c.com", "a@@c.com", "@c.com", "a@c..com", "a\n@c.com", `${"x".repeat(250)}@c.com`, "a@c.com,b@c.com"]) {
+    assert.throws(() => assertEmail(bad, "email"), (e: unknown) => e instanceof ValidationError && e.field === "email", bad);
+  }
+});
+
+test("assertEmails dedupes case-insensitively, keeps order, bounds the count and names the bad entry", () => {
+  assert.deepEqual(assertEmails(["B@x.com", "a@x.com", "b@X.com"], "invitedEmails", 20), ["b@x.com", "a@x.com"]);
+  assert.deepEqual(assertEmails([], "invitedEmails", 20), []);
+  assert.throws(() => assertEmails(Array.from({ length: 21 }, (_, i) => `u${i}@x.com`), "invitedEmails", 20), ValidationError);
+  assert.throws(() => assertEmails(["a@x.com", "nope"], "invitedEmails", 20), (e: unknown) => e instanceof ValidationError && /invitedEmails/.test(e.message));
+});
+
+test("sameNumericId compares ids as integers, whatever their spelling, and never matches non-numbers", () => {
+  assert.equal(sameNumericId("3001", "3001"), true);
+  assert.equal(sameNumericId("03001", "3001"), true);
+  assert.equal(sameNumericId(3001 as unknown as string, "3001"), true);
+  assert.equal(sameNumericId("3001", "3002"), false);
+  assert.equal(sameNumericId("abc", "abc"), false);
+  assert.equal(sameNumericId("", ""), false);
+  assert.equal(sameNumericId("1.5", "1.5"), false);
 });

@@ -1,0 +1,98 @@
+{
+  "data": [
+    {
+      "id": "16059370",
+      "type": "frame_user",
+      "attributes": {
+        "status": "approved",
+        "is_owner": false
+      },
+      "relationships": {
+        "user": {
+          "data": {
+            "id": "13373824",
+            "type": "user"
+          }
+        }
+      }
+    },
+    {
+      "id": "15959896",
+      "type": "frame_user",
+      "attributes": {
+        "status": "approved",
+        "is_owner": false
+      },
+      "relationships": {
+        "user": {
+          "data": {
+            "id": "13291077",
+            "type": "user"
+          }
+        }
+      }
+    },
+    {
+      "id": "16207153",
+      "type": "frame_user",
+      "attributes": {
+        "status": "approved",
+        "is_owner": false
+      },
+      "relationships": {
+        "user": {
+          "data": {
+            "id": "13293082",
+            "type": "user"
+          }
+        }
+      }
+    },
+    {
+      "id": "15640583",
+      "type": "frame_user",
+      "attributes": {
+        "status": "approved",
+        "is_owner": true
+      },
+      "relationships": {
+        "user": {
+          "data": {
+            "id": "12311021",
+            "type": "user"
+          }
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "id": "13373824",
+      "type": "user",
+      "attributes": {
+        "email": "user@example.invalid"
+      }
+    },
+    {
+      "id": "13291077",
+      "type": "user",
+      "attributes": {
+        "email": "user@example.invalid"
+      }
+    },
+    {
+      "id": "13293082",
+      "type": "user",
+      "attributes": {
+        "email": "user@example.invalid"
+      }
+    },
+    {
+      "id": "12311021",
+      "type": "user",
+      "attributes": {
+        "email": "user@example.invalid"
+      }
+    }
+  ]
+}

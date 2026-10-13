@@ -1,0 +1,83 @@
+{
+  "data": [
+    {
+      "id": "48148099",
+      "type": "meal_recipe",
+      "attributes": {
+        "summary": "Recipe 1",
+        "description": "Ingredients:\n- Item A\n- Item B\n\nInstructions:\n1. Step one.\n",
+        "draft": false,
+        "image_url": null,
+        "source": null
+      },
+      "relationships": {
+        "meal_category": {
+          "data": {
+            "id": "6859334",
+            "type": "meal_category"
+          }
+        },
+        "partner": {
+          "data": null
+        }
+      }
+    },
+    {
+      "id": "48148118",
+      "type": "meal_recipe",
+      "attributes": {
+        "summary": "Recipe 2",
+        "description": "Ingredients:\n- Item A\n- Item B\n\nInstructions:\n1. Step one.\n",
+        "draft": false,
+        "image_url": null,
+        "source": null
+      },
+      "relationships": {
+        "meal_category": {
+          "data": {
+            "id": "6859337",
+            "type": "meal_category"
+          }
+        },
+        "partner": {
+          "data": null
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "id": "6859334",
+      "type": "meal_category",
+      "attributes": {
+        "color": "#A8D4D3",
+        "icon": "coffee",
+        "label": "Breakfast",
+        "enabled": true,
+        "position": 0
+      }
+    },
+    {
+      "id": "6859337",
+      "type": "meal_category",
+      "attributes": {
+        "color": "#FDC36D",
+        "icon": "grocery",
+        "label": "Snack",
+        "enabled": true,
+        "position": 3
+      }
+    },
+    {
+      "id": "6859336",
+      "type": "meal_category",
+      "attributes": {
+        "color": "#915EA1",
+        "icon": "skillet-createrecipe",
+        "label": "Dinner",
+        "enabled": true,
+        "position": 2
+      }
+    }
+  ]
+}

@@ -26,6 +26,9 @@ test("doctor prints status, profiles and a Claude Desktop config block", async (
   assert.match(process.execPath, /node(\.exe)?$/);
   assert.match(out, /Frames:\s+77 \(L\)/);
   assert.match(out, /\/abs\/dist\/server\.js/);
+  assert.match(out, /Timezone:\s+America\/New_York \(set SKYLIGHT_TIMEZONE to change\)/);
+  assert.match(out, /token valid until \w{3} \w{3} \d{1,2}, \d{1,2}:\d{2} [AP]M E[SD]T\)/);
+  assert.ok(!out.includes("SKYLIGHT_TIMEZONE\":"), "the default zone is not written into the config block");
   assert.ok(!out.includes("AT"));
   await cleanup();
 });
@@ -81,5 +84,29 @@ test("stableNodePath falls back to execPath when no candidate matches", async ()
   await writeFile(other, "");
   assert.equal(stableNodePath({ execPath: real, candidates: [other, path.join(dir, "missing")] }), real);
   assert.equal(stableNodePath({ execPath: path.join(dir, "gone"), candidates: [real] }), path.join(dir, "gone"));
+  await cleanup();
+});
+
+test("doctor puts SKYLIGHT_TIMEZONE in the Claude Desktop config only when it was set", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const { fetch } = createMockFetch([]);
+  const rt = createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir, SKYLIGHT_TIMEZONE: "America/Chicago" }, fetch, runner });
+  const out = await doctor(rt, { serverPath: "/abs/dist/server.js" });
+  assert.match(out, /Timezone:\s+America\/Chicago/);
+  assert.match(out, /"SKYLIGHT_TIMEZONE": "America\/Chicago"/);
+  await cleanup();
+});
+
+test("doctor lists the enabled toolsets and puts SKYLIGHT_TOOLSETS in the config block only when it was set", async () => {
+  const { dir, cleanup } = await makeTmpDir();
+  const { runner } = createFakeKeychain();
+  const { fetch } = createMockFetch([]);
+  const all = await doctor(createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir }, fetch, runner }), { serverPath: "/abs/dist/server.js" });
+  assert.match(all, /Toolsets:\s+all \(set SKYLIGHT_TOOLSETS/);
+  assert.ok(!all.includes("SKYLIGHT_TOOLSETS\":"), "the default is not written into the config block");
+  const some = await doctor(createRuntime({ env: { SKYLIGHT_CREDENTIALS_DIR: dir, SKYLIGHT_TOOLSETS: "chores, Lists" }, fetch, runner }), { serverPath: "/abs/dist/server.js" });
+  assert.match(some, /Toolsets:\s+chores, lists \(/);
+  assert.match(some, /"SKYLIGHT_TOOLSETS": "chores,lists"/);
   await cleanup();
 });

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../../src/skylight/config.js";
 import { ValidationError } from "../../src/skylight/errors.js";
+import { TOOLSETS } from "../../src/skylight/vocab.js";
 
 test("defaults", () => {
   const c = loadConfig({});
@@ -9,6 +10,8 @@ test("defaults", () => {
   assert.equal(c.apiVersion, "2026-05-01");
   assert.equal(c.requestTimeoutMs, 30000);
   assert.equal(c.frameId, null);
+  assert.equal(c.timezone, "America/New_York");
+  assert.equal(c.timezoneExplicit, false);
   assert.match(c.credentialsDir, /Library\/Application Support\/skylight-mcp\/credentials$/);
 });
 
@@ -21,4 +24,32 @@ test("overrides and validation", () => {
   assert.throws(() => loadConfig({ SKYLIGHT_FRAME_ID: "../x" }), ValidationError);
   assert.equal(loadConfig({ SKYLIGHT_CREDENTIALS_DIR: "/tmp/x" }).credentialsDir, "/tmp/x");
   assert.throws(() => loadConfig({ SKYLIGHT_REQUEST_TIMEOUT_MS: "abc" }), ValidationError);
+});
+
+test("SKYLIGHT_TIMEZONE sets the zone, is validated, and marks itself explicit", () => {
+  const c = loadConfig({ SKYLIGHT_TIMEZONE: " Europe/London " });
+  assert.deepEqual([c.timezone, c.timezoneExplicit], ["Europe/London", true]);
+  assert.equal(loadConfig({ SKYLIGHT_TIMEZONE: "" }).timezoneExplicit, false);
+  assert.throws(() => loadConfig({ SKYLIGHT_TIMEZONE: "Mars/Olympus" }), (e: unknown) => e instanceof ValidationError && e.field === "SKYLIGHT_TIMEZONE");
+  assert.throws(() => loadConfig({ SKYLIGHT_TIMEZONE: "EST5EDT garbage" }), ValidationError);
+});
+
+test("SKYLIGHT_TOOLSETS defaults to every toolset and is not explicit", () => {
+  const c = loadConfig({});
+  assert.deepEqual([...c.toolsets], [...TOOLSETS]);
+  assert.equal(c.toolsetsExplicit, false);
+  assert.deepEqual([...loadConfig({ SKYLIGHT_TOOLSETS: "  " }).toolsets], [...TOOLSETS]);
+  assert.equal(loadConfig({ SKYLIGHT_TOOLSETS: "" }).toolsetsExplicit, false);
+});
+
+test("SKYLIGHT_TOOLSETS picks a comma list: trimmed, lower-cased, de-duplicated, empties ignored", () => {
+  const c = loadConfig({ SKYLIGHT_TOOLSETS: " Chores, lists ,chores,," });
+  assert.deepEqual([...c.toolsets], ["chores", "lists"]);
+  assert.equal(c.toolsetsExplicit, true);
+});
+
+test("SKYLIGHT_TOOLSETS rejects unknown names, naming them and the valid choices, and an empty list", () => {
+  assert.throws(() => loadConfig({ SKYLIGHT_TOOLSETS: "chores,bogus" }), (e: unknown) => e instanceof ValidationError && e.field === "SKYLIGHT_TOOLSETS" && /"bogus"/.test(e.message) && /meals/.test(e.message));
+  assert.throws(() => loadConfig({ SKYLIGHT_TOOLSETS: "chores,nope,worse" }), (e: unknown) => e instanceof ValidationError && /"nope"/.test(e.message) && /"worse"/.test(e.message));
+  assert.throws(() => loadConfig({ SKYLIGHT_TOOLSETS: " , " }), (e: unknown) => e instanceof ValidationError && e.field === "SKYLIGHT_TOOLSETS");
 });

@@ -1,6 +1,6 @@
 import { ValidationError } from "./errors.js";
 import { assertDate } from "./ids.js";
-import { slotFromHour, type RoutineHour } from "./vocab.js";
+import { RRULE_PREFIX, slotFromHour, type RoutineHour } from "./vocab.js";
 
 export const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 export type Weekday = (typeof WEEKDAYS)[number];
@@ -44,11 +44,16 @@ export function buildRrule(r: Recurrence): string {
     assertDate(r.until, "recurrence.until");
     parts.push(`UNTIL=${r.until.replaceAll("-", "")}`);
   }
-  return `RRULE:${parts.join(";")}`;
+  return `${RRULE_PREFIX}${parts.join(";")}`;
 }
 
 /** The BYHOUR of an RRULE string, or null. */
 export function hourFromRrule(rule: string | null): number | null {
   const m = rule === null ? null : /(?:^|[:;])BYHOUR=(\d{1,2})(?=;|$)/.exec(rule);
   return m ? Number(m[1]) : null;
+}
+
+/** "RRULE:FREQ=DAILY" -> "FREQ=DAILY". Meal plans store (and want) the rule without the prefix. */
+export function stripRrulePrefix(rule: string): string {
+  return rule.startsWith(RRULE_PREFIX) ? rule.slice(RRULE_PREFIX.length) : rule;
 }

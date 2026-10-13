@@ -2,12 +2,27 @@ import { ValidationError } from "./errors.js";
 
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+const CONTROL_EXCEPT_LAYOUT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/;
 
 export function assertId(value: string | number, field: string): string {
   const s = typeof value === "number" ? String(value) : value;
   if (typeof s !== "string" || !ID_PATTERN.test(s)) {
     throw new ValidationError(field, "must be 1-64 letters, digits, '_' or '-'");
   }
+  return s;
+}
+
+/** True when both are whole-number ids with the same value, however they are spelled ("3001" and "03001"); non-numbers never match. */
+export function sameNumericId(a: string | number, b: string | number): boolean {
+  const x = typeof a === "number" ? a : /^\d+$/.test(a) ? Number(a) : NaN;
+  const y = typeof b === "number" ? b : /^\d+$/.test(b) ? Number(b) : NaN;
+  return Number.isSafeInteger(x) && x === y;
+}
+
+/** A positive decimal id of at most 15 digits (list item ids), returned as a string; the API wants them as JSON numbers in bodies. */
+export function assertNumericId(value: string | number, field: string): string {
+  const s = typeof value === "number" ? String(value) : value;
+  if (typeof s !== "string" || !/^[1-9]\d{0,14}$/.test(s)) throw new ValidationError(field, "must be a numeric id as returned by the list tools");
   return s;
 }
 
@@ -28,9 +43,19 @@ export function parseChoreId(value: unknown, field: string): ChoreRef {
   };
 }
 
-export function localDateString(d: Date = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** `<masterId>` or `<masterId>-<unixSeconds>` (an occurrence of a recurring calendar event, e.g. `11019627806-1791803100`). */
+export const COMPOSITE_EVENT_ID = /^(\d+)(?:-(\d+))?$/;
+
+export interface EventRef { masterId: string; /** Unix seconds of the occurrence, null for a plain (master or one-off) id. */ occurrence: number | null }
+
+/** Accepts "123" or "123-1791803100". Throws ValidationError(field) otherwise. */
+export function parseEventId(value: unknown, field: string): EventRef {
+  const id = typeof value === "number" ? String(value) : typeof value === "string" ? value : "";
+  const m = id.length <= 64 ? COMPOSITE_EVENT_ID.exec(id) : null;
+  if (!m) throw new ValidationError(field, "must be an event id as listed by skylight_list_events: digits, or digits-digits for one occurrence of a recurring event");
+  const occurrence = m[2] === undefined ? null : Number(m[2]);
+  if (occurrence !== null && !Number.isSafeInteger(occurrence)) throw new ValidationError(field, "has an occurrence timestamp that is too large");
+  return { masterId: m[1]!, occurrence };
 }
 
 export function assertDate(value: string, field: string): string {
@@ -55,6 +80,33 @@ export function cleanText(value: string, field: string, max: number): string {
   if (out.length === 0) throw new ValidationError(field, "must not be blank");
   if (out.length > max) throw new ValidationError(field, `must be at most ${max} characters`);
   return out;
+}
+
+/** Like cleanText for multi-line text (recipe and meal descriptions): newlines and tabs are kept (CRLF becomes LF), other control characters are refused. */
+export function cleanParagraph(value: string, field: string, max: number): string {
+  if (typeof value !== "string") throw new ValidationError(field, "must be a string");
+  if (!value.isWellFormed()) throw new ValidationError(field, "must be well-formed unicode");
+  const normalized = value.replaceAll("\r\n", "\n");
+  if (CONTROL_EXCEPT_LAYOUT.test(normalized)) throw new ValidationError(field, "must not contain control characters");
+  const out = normalized.normalize("NFC").trim();
+  if (out.length === 0) throw new ValidationError(field, "must not be blank");
+  if (out.length > max) throw new ValidationError(field, `must be at most ${max} characters`);
+  return out;
+}
+
+const EMAIL_PATTERN = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
+/** A plain email address, trimmed and lower-cased. */
+export function assertEmail(value: string, field: string): string {
+  const out = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (out.length === 0 || out.length > 254 || !EMAIL_PATTERN.test(out)) throw new ValidationError(field, "must be an email address like name@example.com");
+  return out;
+}
+
+/** 0..max emails, each validated, de-duplicated case-insensitively with the first occurrence kept. */
+export function assertEmails(values: string[], field: string, max: number): string[] {
+  if (!Array.isArray(values) || values.length > max) throw new ValidationError(field, `must list at most ${max} email addresses`);
+  return [...new Set(values.map((v) => assertEmail(v, field)))];
 }
 
 export function assertEmoji(value: string, field: string): string {

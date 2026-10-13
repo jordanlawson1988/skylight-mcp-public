@@ -1,0 +1,67 @@
+{
+  "data": [
+    {
+      "id": "112792712",
+      "type": "list_item",
+      "attributes": {
+        "id": 112792712,
+        "label": "Item 1",
+        "status": "completed",
+        "section": null,
+        "position": 8,
+        "created_at": "2026-01-10T17:45:16.851Z",
+        "draft": false
+      },
+      "relationships": {
+        "list": {
+          "data": {
+            "id": "4771333",
+            "type": "list"
+          }
+        }
+      }
+    },
+    {
+      "id": "116397855",
+      "type": "list_item",
+      "attributes": {
+        "id": 116397855,
+        "label": "Item 2",
+        "status": "completed",
+        "section": null,
+        "position": 34,
+        "created_at": "2026-01-16T17:03:23.669Z",
+        "draft": false
+      },
+      "relationships": {
+        "list": {
+          "data": {
+            "id": "4771333",
+            "type": "list"
+          }
+        }
+      }
+    },
+    {
+      "id": "110823231",
+      "type": "list_item",
+      "attributes": {
+        "id": 110823231,
+        "label": "Item 3",
+        "status": "completed",
+        "section": "Produce",
+        "position": 6,
+        "created_at": "2026-01-06T23:10:07.405Z",
+        "draft": false
+      },
+      "relationships": {
+        "list": {
+          "data": {
+            "id": "4771333",
+            "type": "list"
+          }
+        }
+      }
+    }
+  ]
+}

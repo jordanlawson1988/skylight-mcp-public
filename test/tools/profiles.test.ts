@@ -10,13 +10,16 @@ test("tool list contains only expected tools with full annotations", async () =>
   const names = tools.map((x) => x.name).sort();
   assert.ok(names.includes("skylight_auth_status"));
   assert.ok(names.includes("skylight_list_profiles"));
-  for (const bad of ["delete_account", "user_delete", "photo", "device", "invite", "frame_transfer"]) {
+  // Never exposed, even after phase 3 added photos, devices, sharing and account tools: account deletion, frame transfer, and the
+  // features whose behavior is unverified or unsafe (alarms, sleep schedules, device config, frame rename and hide, push preferences, photo privacy).
+  for (const bad of ["delete_account", "user_delete", "frame_transfer", "alarm", "sleep_schedule", "device_config", "rename_frame", "hide_frame", "push", "privacy", "viewab", "public"]) {
     assert.ok(!names.some((n) => n.includes(bad)), `unexpected tool matching ${bad}`);
   }
   for (const tool of tools) {
     const a = tool.annotations ?? {};
     for (const k of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]) assert.equal(typeof (a as Record<string, unknown>)[k], "boolean", `${tool.name}.${k}`);
-    assert.equal((a as Record<string, unknown>).openWorldHint, false);
+    // Only inviting someone by email reaches a third party.
+    assert.equal((a as Record<string, unknown>).openWorldHint, tool.name === "skylight_invite_frame_user", tool.name);
   }
   await t.close();
 });
@@ -28,6 +31,17 @@ test("skylight_auth_status never leaks tokens", async () => {
   assert.equal((r.data as { loggedIn: boolean }).loggedIn, true);
   assert.equal((r.data as { frameId: string }).frameId, "77");
   assert.ok(!r.text.includes("AT") && !r.text.includes("RT"));
+  await t.close();
+});
+
+test("skylight_auth_status shows the token expiry in the configured zone and keeps the ISO", async () => {
+  const t = await connectTestClient([FRAMES]);
+  const d = (await t.callTool("skylight_auth_status")).data as { tokenExpiresAt: string; tokenExpiresAtLocal: string; tokenExpiresWhen: string; timezone: string };
+  assert.match(d.tokenExpiresAt, /Z$/);
+  assert.equal(d.timezone, "America/New_York");
+  assert.match(d.tokenExpiresAtLocal, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-0[45]:00$/);
+  assert.match(d.tokenExpiresWhen, /^\w{3} \w{3} \d{1,2}, \d{1,2}:\d{2} [AP]M E[SD]T$/);
+  assert.equal(Date.parse(d.tokenExpiresAtLocal), Date.parse(d.tokenExpiresAt.replace(/\.\d+Z$/, "Z")));
   await t.close();
 });
 
@@ -241,5 +255,15 @@ test("preview with reassign sends no DELETE", async () => {
   const r = await t.callTool("skylight_delete_profile", { profileId: "12", reassignToProfileId: "14" });
   assert.equal((r.data as { confirmed: boolean }).confirmed, false);
   assert.equal(t.calls.filter((c) => c.method === "DELETE").length, 0);
+  await t.close();
+});
+
+test("delete profile preview counts upcoming chores from the configured zone's today", async () => {
+  const t = await connectTestClient([FRAMES,
+    { method: "GET", path: "/api/frames/77/categories", json: { data: [{ id: "12", attributes: { label: "Ellie", linked_to_profile: true } }] } },
+    { method: "GET", path: "/api/frames/77/chores", json: { data: [] } }], { env: { SKYLIGHT_TIMEZONE: "Pacific/Auckland" }, now: () => new Date("2026-10-12T23:30:00Z") });
+  await t.callTool("skylight_delete_profile", { profileId: "12" });
+  const q = t.calls.find((c) => c.url.pathname === "/api/frames/77/chores")!.url.searchParams;
+  assert.deepEqual([q.get("after"), q.get("before")], ["2026-10-13", "2027-01-11"]);
   await t.close();
 });

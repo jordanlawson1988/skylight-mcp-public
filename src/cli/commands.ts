@@ -1,5 +1,6 @@
 import type { Runtime } from "../runtime.js";
 import { AuthError } from "../skylight/errors.js";
+import { formatHuman, formatOffsetDateTime } from "../skylight/time.js";
 import { findCallbackInChromeHistory } from "./chrome-history.js";
 import { buildAuthorizeUrl, createPendingLogin, exchangeCode, parseCallbackUrl, type PkceMethod } from "../skylight/oauth.js";
 
@@ -51,11 +52,19 @@ export interface StatusReport {
   loggedIn: boolean;
   needsLogin: boolean;
   apiHost: string;
+  /** Token expiry in UTC (ISO). */
   tokenExpiresAt: string | null;
+  /** The same instant in the configured zone, with an explicit offset. */
+  tokenExpiresAtLocal: string | null;
+  /** The same instant in plain words, e.g. "Tue Oct 13, 2:05 PM EDT". */
+  tokenExpiresWhen: string | null;
+  timezone: string;
   frameId: string | null;
   frameError: string | null;
   credentialError: string | null;
 }
+
+const NO_EXPIRY = { tokenExpiresAtLocal: null, tokenExpiresWhen: null } as const;
 
 export async function status(rt: Runtime): Promise<StatusReport> {
   const apiHost = new URL(rt.config.apiBaseUrl).host;
@@ -63,9 +72,9 @@ export async function status(rt: Runtime): Promise<StatusReport> {
   try {
     cred = await rt.store.read();
   } catch (e) {
-    return { loggedIn: false, needsLogin: true, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: e instanceof Error ? e.message : String(e) };
+    return { loggedIn: false, needsLogin: true, apiHost, tokenExpiresAt: null, ...NO_EXPIRY, timezone: rt.config.timezone, frameId: null, frameError: null, credentialError: e instanceof Error ? e.message : String(e) };
   }
-  if (cred === null) return { loggedIn: false, needsLogin: true, apiHost, tokenExpiresAt: null, frameId: null, frameError: null, credentialError: null };
+  if (cred === null) return { loggedIn: false, needsLogin: true, apiHost, tokenExpiresAt: null, ...NO_EXPIRY, timezone: rt.config.timezone, frameId: null, frameError: null, credentialError: null };
   let frameId: string | null = null;
   let frameError: string | null = null;
   let needsLogin = false;
@@ -75,5 +84,6 @@ export async function status(rt: Runtime): Promise<StatusReport> {
     frameError = e instanceof Error ? e.message : String(e);
     needsLogin = e instanceof AuthError && /expired or was revoked|Not logged in|rejected the credentials/.test(e.message);
   }
-  return { loggedIn: true, needsLogin, apiHost, tokenExpiresAt: new Date(cred.expiresAt).toISOString(), frameId, frameError, credentialError: null };
+  const iso = new Date(cred.expiresAt).toISOString();
+  return { loggedIn: true, needsLogin, apiHost, tokenExpiresAt: iso, tokenExpiresAtLocal: formatOffsetDateTime(iso, rt.config.timezone), tokenExpiresWhen: formatHuman(iso, rt.config.timezone), timezone: rt.config.timezone, frameId, frameError, credentialError: null };
 }

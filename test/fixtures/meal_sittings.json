@@ -1,0 +1,8 @@
+{
+  "data": [
+    { "id": "1001", "type": "meal_sitting", "attributes": { "summary": "Pasta night", "description": "Ingredients:\n- Noodles\n- Sauce\n", "note": "Use the big pot", "rrule": null, "draft": false, "recurring": false, "instances": ["2026-10-13"] }, "relationships": { "meal_category": { "data": { "id": "6859336", "type": "meal_category" } }, "meal_recipe": { "data": { "id": "2001", "type": "meal_recipe" } }, "profiles": { "data": [] } } },
+    { "id": "1002", "type": "meal_sitting", "attributes": { "summary": "Cereal", "description": null, "note": null, "rrule": "FREQ=DAILY", "draft": false, "recurring": true, "instances": ["2026-10-13", "2026-10-14", "2026-10-15"] }, "relationships": { "meal_category": { "data": { "id": "6859334", "type": "meal_category" } }, "meal_recipe": { "data": null }, "profiles": { "data": [] } } }
+  ],
+  "included": [ { "id": "6859336", "type": "meal_category", "attributes": { "color": "#915EA1", "icon": "skillet-createrecipe", "label": "Dinner", "enabled": true, "position": 2 } } ],
+  "meta": { "date_min": "2026-10-12", "date_max": "2026-10-19" }
+}

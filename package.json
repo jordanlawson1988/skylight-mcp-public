@@ -1,7 +1,7 @@
 {
   "name": "@jordanlawson/skylight-mcp",
   "version": "0.1.0",
-  "description": "Unofficial local MCP server for Skylight Calendar: profiles, chores, routines, rewards.",
+  "description": "Unofficial local MCP server for Skylight Calendar: profiles, chores, routines, rewards, lists, events, meals, photos, devices, frame.",
   "license": "MIT",
   "private": true,
   "type": "module",

@@ -1,13 +1,39 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { TOOLSETS, type Toolset } from "../skylight/vocab.js";
+import { registerAccountTools } from "./account.js";
 import { registerAuthTools } from "./auth.js";
+import { registerCalendarTools } from "./calendar.js";
 import type { ToolContext } from "./context.js";
 import { registerChoreTools } from "./chores.js";
+import { registerDeviceTools } from "./devices.js";
+import { registerFrameTools } from "./frame.js";
+import { registerListTools } from "./lists.js";
+import { registerMealTools } from "./meals.js";
+import { registerPhotoTools } from "./photos.js";
 import { registerProfileTools } from "./profiles.js";
+import { registerRecipeTools } from "./recipes.js";
 import { registerRewardTools } from "./rewards.js";
 
+type Registrar = (server: McpServer, ctx: ToolContext) => void;
+
+/** One registrar per toolset (SKYLIGHT_TOOLSETS picks which run). */
+const REGISTRARS: Record<Toolset, Registrar> = {
+  profiles: registerProfileTools,
+  chores: registerChoreTools,
+  rewards: registerRewardTools,
+  lists: registerListTools,
+  calendar: registerCalendarTools,
+  meals: (server, ctx) => { registerMealTools(server, ctx); registerRecipeTools(server, ctx); },
+  photos: registerPhotoTools,
+  devices: registerDeviceTools,
+  frame: registerFrameTools,
+  account: registerAccountTools,
+};
+
+/** skylight_auth_status is always registered; every other group only when its toolset is enabled. */
 export function registerAllTools(server: McpServer, ctx: ToolContext): void {
   registerAuthTools(server, ctx);
-  registerProfileTools(server, ctx);
-  registerChoreTools(server, ctx);
-  registerRewardTools(server, ctx);
+  for (const toolset of TOOLSETS) {
+    if (ctx.config.toolsets.has(toolset)) REGISTRARS[toolset](server, ctx);
+  }
 }
