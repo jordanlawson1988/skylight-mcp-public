@@ -33,4 +33,6 @@ export interface ToolContext {
   authStatus(): Promise<AuthStatusReport>;
   /** Records calls of tools that can change something (the shared server's activity log). */
   audit?: (entry: AuditEntry) => Promise<void>;
+  /** Logs an unexpected tool error. The Mac default writes the stack to stderr; the Worker logs a redacted line without it. */
+  logError?: (error: unknown) => void;
 }

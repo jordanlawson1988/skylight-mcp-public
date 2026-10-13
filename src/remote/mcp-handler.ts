@@ -8,8 +8,9 @@ import { buildAuthStatus, LOGIN_HINTS, type AuthStatusReport } from "../skylight
 import type { ToolContext } from "../tools/context.js";
 import { unwrapToken, type AccountRpc } from "./account-core.js";
 import { registerActivityTool } from "./activity-tool.js";
-import { configFromEnv, type RemoteEnv } from "./env.js";
+import { configFromEnv, secretValues, type RemoteEnv } from "./env.js";
 import { isAllowed, parseAllowlist, type FamilyProps } from "./google.js";
+import { workerErrorLogger } from "./log.js";
 
 /**
  * POST /mcp, after the OAuth provider has validated the bearer token (audience = this server's /mcp) and put the
@@ -22,6 +23,8 @@ export interface McpHandlerDeps {
   /** Skylight API fetch; the Worker's global fetch by default. */
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
+  /** Unexpected tool errors; the Worker's redacted, stack-free logger by default. */
+  logError?: (error: unknown) => void;
 }
 
 /** A JSON-RPC batch may hold at most this many messages; each one counts toward the person's rate limit. */
@@ -92,6 +95,7 @@ export function createMcpHandler(deps: McpHandlerDeps) {
         config, client, frames, now,
         authStatus: () => remoteAuthStatus(account, config, frames),
         audit: (entry) => account.appendAudit({ ...entry, at: now().toISOString(), who: who.email }),
+        logError: deps.logError ?? workerErrorLogger(secretValues(env)),
       };
       const server = createServer(toolCtx);
       registerActivityTool(server, { account, config });

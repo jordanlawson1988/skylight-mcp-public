@@ -1,11 +1,11 @@
 import { OAuthProvider, type OAuthHelpers } from "@cloudflare/workers-oauth-provider";
-import { excerpt } from "../skylight/redact.js";
 import type { AccountRpc } from "./account-core.js";
 import { SkylightAccount } from "./account-do.js";
 import { handleAdmin } from "./admin.js";
 import { edgeGuard, type RateLimitBinding } from "./edge-guard.js";
 import { ACCOUNT_OBJECT_NAME, secretValues, type RemoteEnv } from "./env.js";
 import { handleAuthorize, handleCallback, type OAuthApi } from "./google.js";
+import { describeError } from "./log.js";
 import { createMcpHandler } from "./mcp-handler.js";
 import { providerPolicy } from "./provider-options.js";
 
@@ -86,7 +86,7 @@ export default {
       status = response.status;
       return response;
     } catch (e) {
-      console.error(JSON.stringify({ method: request.method, path: url.pathname, error: excerpt(e instanceof Error ? `${e.name}: ${e.message}` : String(e), secretValues(env), 300) }));
+      console.error(JSON.stringify({ method: request.method, path: url.pathname, error: describeError(e, secretValues(env)) }));
       return new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     } finally {
       // Method, path (never the query), status, duration. No headers, no bodies.
