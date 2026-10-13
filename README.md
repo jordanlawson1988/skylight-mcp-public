@@ -109,6 +109,7 @@ What is logged:
 To take access away:
 
 - One person: `skylight-mcp remote revoke <email> --env production` disconnects every app they connected and forgets which Google account that email was bound to (so their next sign-in binds again, for example after they change Google accounts); remove them from `ALLOWED_EMAILS` (`npx wrangler secret put ALLOWED_EMAILS --env production`) to keep them out.
+- If a server ever ran without the app allowlist (Claude and ChatGPT redirect addresses only), clear out what it may have handed to other apps: start with a fresh `OAUTH_KV` namespace, or run `skylight-mcp remote revoke <email>` for each family member. Apps registered back then can no longer get new access, because `/authorize` re-checks every redirect address.
 - The server's Skylight access: `skylight-mcp remote logout --env production` (asks first). Tools then answer that Jordan needs to run `skylight-mcp remote login`.
 
 Limits and notes:
