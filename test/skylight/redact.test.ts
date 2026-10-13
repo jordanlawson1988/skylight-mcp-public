@@ -9,6 +9,12 @@ test("masks JSON string values under secret keys", () => {
   assert.match(out, /"other":"keep"/);
 });
 
+test("masks the shared server's Google and admin secrets under their JSON keys too", () => {
+  const out = excerpt('{"client_secret":"gs-1","id_token":"a.b.c","admin_token":"adm-2","error":"invalid_grant"}');
+  for (const v of ["gs-1", "a.b.c", "adm-2"]) assert.ok(!out.includes(v), v);
+  assert.match(out, /"error":"invalid_grant"/);
+});
+
 test("masks Bearer credentials", () => {
   const out = excerpt("authorization=Bearer abc.DEF-123_x/y+z== trailing");
   assert.equal(out, "authorization=Bearer [redacted] trailing");
