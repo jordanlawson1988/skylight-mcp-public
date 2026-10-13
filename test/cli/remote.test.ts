@@ -54,6 +54,7 @@ const adminRoutes = (over: Partial<MockRoute> = {}): MockRoute[] => [
   { method: "PUT", path: "/admin/skylight-credential", json: { ok: true, tokenExpiresAt: "2026-10-13T18:05:00.000Z" } },
   { method: "DELETE", path: "/admin/skylight-credential", json: { removed: true } },
   { method: "DELETE", path: "/admin/grants", json: { email: "wife@example.com", revoked: 2 } },
+  { method: "DELETE", path: "/admin/identity", json: { email: "wife@example.com", removed: true } },
 ];
 
 async function withServer(t: Awaited<ReturnType<typeof setup>>, token = "ADMIN-TOKEN-0123456789abcdefghijklmnopqrstuv") {
@@ -223,14 +224,15 @@ test("remote logout asks first and only deletes on yes", async () => {
   await t.cleanup();
 });
 
-test("remote revoke disconnects a family member's apps by lower-cased email", async () => {
+test("remote revoke disconnects a family member's apps and clears their Google binding, by lower-cased email", async () => {
   const t = await setup(adminRoutes());
   await withServer(t);
   await t.run("revoke", "Wife@Example.com", "--env", "staging");
-  const call = t.calls.find((c) => c.url.pathname === "/admin/grants")!;
-  assert.equal(call.method, "DELETE");
-  assert.equal(call.url.searchParams.get("email"), "wife@example.com");
-  assert.match(t.text(), /Revoked 2 connections for wife@example\.com/);
+  const calls = t.calls.filter((c) => c.url.pathname === "/admin/grants" || c.url.pathname === "/admin/identity");
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url.pathname}`), ["DELETE /admin/grants", "DELETE /admin/identity"]);
+  for (const c of calls) assert.equal(c.url.searchParams.get("email"), "wife@example.com");
+  assert.match(t.text(), /Revoked 2 connections for wife@example\.com and cleared its Google account binding/);
+  await assert.rejects(t.run("revoke", "w\u0456fe@example.com", "--env", "staging"), /Usage: skylight-mcp remote revoke <email>/);
   await assert.rejects(t.run("revoke", "--env", "staging"), /Usage: skylight-mcp remote revoke <email>/);
   await t.cleanup();
 });

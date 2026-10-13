@@ -24,7 +24,7 @@ test("an unexpected tool error on the Worker is logged as one redacted line, wit
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "skylight_recent_activity", arguments: {} } }),
-    }), ENV, { props: { email: "jordan@example.com", name: "J" } });
+    }), ENV, { props: { email: "jordan@example.com", name: "J", sub: "sub-j" } });
   } finally {
     console.error = original;
   }

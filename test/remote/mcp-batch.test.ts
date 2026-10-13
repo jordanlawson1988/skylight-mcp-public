@@ -22,7 +22,7 @@ function setup() {
   const handler = createMcpHandler({ account: () => account, fetch: createMockFetch([]).fetch });
   const post = (body: string, headers: Record<string, string> = {}) => handler.fetch(new Request(`${ORIGIN}/mcp`, {
     method: "POST", body, headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-  }), ENV, { props: { email: "jordan@example.com", name: "J" } });
+  }), ENV, { props: { email: "jordan@example.com", name: "J", sub: "sub-j" } });
   return { post, allows };
 }
 

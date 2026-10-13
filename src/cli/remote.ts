@@ -4,6 +4,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GENERATED_SECRETS } from "../remote/env.js";
+import { isPlainEmail } from "../remote/identity.js";
 import type { Runtime } from "../runtime.js";
 import type { KeychainRunner } from "../skylight/credentials.js";
 import { AuthError } from "../skylight/errors.js";
@@ -253,10 +254,13 @@ export async function remoteLogout(deps: RemoteDeps, args: RemoteArgs): Promise<
 
 export async function remoteRevoke(deps: RemoteDeps, args: RemoteArgs): Promise<void> {
   const email = args.email?.trim().toLowerCase() ?? "";
-  if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)) throw new Error("Usage: skylight-mcp remote revoke <email> --env staging|production");
-  const r = await admin(deps, args.env, "DELETE", `/admin/grants?email=${encodeURIComponent(email)}`) as { revoked?: number };
+  if (!isPlainEmail(email)) throw new Error("Usage: skylight-mcp remote revoke <email> --env staging|production");
+  const query = `?email=${encodeURIComponent(email)}`;
+  const r = await admin(deps, args.env, "DELETE", `/admin/grants${query}`) as { revoked?: number };
+  // Also forget which Google account the email is bound to, so the next sign-in binds again.
+  const id = await admin(deps, args.env, "DELETE", `/admin/identity${query}`) as { removed?: boolean };
   const n = r.revoked ?? 0;
-  deps.io.write(`Revoked ${n} connection${n === 1 ? "" : "s"} for ${email}. They stay off until they connect again${n > 0 ? " (remove them from ALLOWED_EMAILS to keep them out)" : ""}.\n`);
+  deps.io.write(`Revoked ${n} connection${n === 1 ? "" : "s"} for ${email}${id.removed ? " and cleared its Google account binding" : ""}. They stay off until they connect again (remove them from ALLOWED_EMAILS to keep them out).\n`);
 }
 
 export async function runRemote(argv: string[], deps: RemoteDeps): Promise<number> {

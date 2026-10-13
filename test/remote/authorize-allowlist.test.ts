@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import type { RemoteEnv } from "../../src/remote/env.js";
 import { handleAuthorize } from "../../src/remote/google.js";
 import { createFakeOAuth } from "../helpers/fake-oauth.js";
+import { createMemoryKv } from "../helpers/memory-kv.js";
 import { createMockFetch } from "../helpers/mock-fetch.js";
 
 const ORIGIN = "https://skylight-mcp-staging.example.workers.dev";
 const ENV: RemoteEnv = { GOOGLE_CLIENT_ID: "google-client", GOOGLE_CLIENT_SECRET: "google-secret-value", ALLOWED_EMAILS: "jordan@example.com" };
 
 async function authorizeWith(fake: ReturnType<typeof createFakeOAuth>, query = "client_id=client-1") {
-  return handleAuthorize(new Request(`${ORIGIN}/authorize?${query}`), { oauth: fake.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => Date.now() });
+  return handleAuthorize(new Request(`${ORIGIN}/authorize?${query}`), { oauth: fake.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => Date.now(), identities: createMemoryKv() });
 }
 
 async function assertRefused(res: Response) {

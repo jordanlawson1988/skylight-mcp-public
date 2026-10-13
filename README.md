@@ -97,7 +97,9 @@ Run these from your clone of this repository (the commands use its `wrangler.jso
 7. Claude (web, Desktop and iPhone share connectors): Customize > Connectors > Add custom connector, URL `https://skylight-mcp-staging.<your-subdomain>.workers.dev/mcp`. Leave the OAuth client fields empty; Claude registers itself. Connect, approve the consent page, then choose your Google account. Claude Free allows one custom connector.
 8. ChatGPT Business: the workspace owner turns on Developer mode for apps in the workspace settings; then, in ChatGPT, Settings > Apps, add a custom MCP server with the same `/mcp` URL and OAuth authentication. If the workspace belongs to an employer, its policy or admin may not allow a personal connector.
 
-What the sign-in shows: a consent page naming the app (Claude or ChatGPT), where access will be sent, and "This connects to the Lawson family Skylight", then Google's account chooser. A Google account that is not on `ALLOWED_EMAILS` gets "This Google account is not on the family list." and no access. The list is checked again on every call, so removing an email takes effect immediately. An app's connection lasts up to 30 days, then it asks you to connect again.
+What the sign-in shows: a consent page naming the app (Claude or ChatGPT), where access will be sent, and "This connects to the Lawson family Skylight", then Google's account chooser. A Google account that is not on `ALLOWED_EMAILS` gets "This Google account is not on the family list." and no access. The list is checked again on every call, so removing an email takes effect immediately. Emails must be plain ASCII (look-alike characters are refused). The first successful sign-in for each email also records that Google account's permanent id; a different Google account presenting the same email later is refused the same way. An app's connection lasts up to 30 days, then it asks you to connect again.
+
+If a family member's address is a Google Workspace account (an employer's or a school's, not plain Gmail), that Workspace's administrators control the account and can sign in as that person, so they could reach the family Skylight too. Prefer personal Gmail addresses on `ALLOWED_EMAILS`.
 
 What is logged:
 
@@ -106,7 +108,7 @@ What is logged:
 
 To take access away:
 
-- One person: `skylight-mcp remote revoke <email> --env production` disconnects every app they connected; remove them from `ALLOWED_EMAILS` (`npx wrangler secret put ALLOWED_EMAILS --env production`) to keep them out.
+- One person: `skylight-mcp remote revoke <email> --env production` disconnects every app they connected and forgets which Google account that email was bound to (so their next sign-in binds again, for example after they change Google accounts); remove them from `ALLOWED_EMAILS` (`npx wrangler secret put ALLOWED_EMAILS --env production`) to keep them out.
 - The server's Skylight access: `skylight-mcp remote logout --env production` (asks first). Tools then answer that Jordan needs to run `skylight-mcp remote login`.
 
 Limits and notes:

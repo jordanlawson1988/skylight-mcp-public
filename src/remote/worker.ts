@@ -5,6 +5,7 @@ import { handleAdmin } from "./admin.js";
 import { edgeGuard, type RateLimitBinding } from "./edge-guard.js";
 import { ACCOUNT_OBJECT_NAME, secretValues, type RemoteEnv } from "./env.js";
 import { handleAuthorize, handleCallback, type OAuthApi } from "./google.js";
+import type { IdentityKv } from "./identity.js";
 import { describeError } from "./log.js";
 import { createMcpHandler } from "./mcp-handler.js";
 import { providerPolicy } from "./provider-options.js";
@@ -36,6 +37,12 @@ function oauthFor(env: RemoteEnv): OAuthApi {
   return helpers;
 }
 
+/** Google sub bindings live in OAUTH_KV next to the provider's own records (prefix identity:). */
+function identitiesFor(env: RemoteEnv): IdentityKv {
+  const kv = (env as Env).OAUTH_KV;
+  return { get: (key) => kv.get(key), put: (key, value) => kv.put(key, value), delete: (key) => kv.delete(key) };
+}
+
 const mcp = createMcpHandler({ account: accountFor });
 
 const apiHandler: ExportedHandler<Env> & { fetch: NonNullable<ExportedHandler<Env>["fetch"]> } = {
@@ -45,10 +52,10 @@ const apiHandler: ExportedHandler<Env> & { fetch: NonNullable<ExportedHandler<En
 const defaultHandler: ExportedHandler<Env> = {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const deps = { oauth: oauthFor(env), env, fetch: (...args: Parameters<typeof fetch>) => fetch(...args), now: () => Date.now() };
+    const deps = { oauth: oauthFor(env), env, fetch: (...args: Parameters<typeof fetch>) => fetch(...args), now: () => Date.now(), identities: identitiesFor(env) };
     if (url.pathname === "/authorize") return handleAuthorize(request, deps);
     if (url.pathname === "/callback" && request.method === "GET") return handleCallback(request, deps);
-    if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return handleAdmin(request, env, { account: accountFor, oauth: oauthFor });
+    if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return handleAdmin(request, env, { account: accountFor, oauth: oauthFor, identities: identitiesFor });
     if (url.pathname === "/health" && request.method === "GET") return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
     return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   },

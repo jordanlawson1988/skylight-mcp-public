@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { AccountCore, accountRpc, type AccountRpc } from "../../src/remote/account-core.js";
-import { ADMIN_CREDENTIAL_PATH, ADMIN_GRANTS_PATH, handleAdmin, isAdminRequest } from "../../src/remote/admin.js";
+import { ADMIN_CREDENTIAL_PATH, ADMIN_GRANTS_PATH, ADMIN_IDENTITY_PATH, handleAdmin, isAdminRequest } from "../../src/remote/admin.js";
+import { bindIdentity, identityKey } from "../../src/remote/identity.js";
 import type { RemoteEnv } from "../../src/remote/env.js";
 import { parseConfig } from "../../src/skylight/config.js";
 import { createFakeOAuth } from "../helpers/fake-oauth.js";
@@ -18,13 +19,14 @@ function setup(env: RemoteEnv = { ADMIN_TOKEN }) {
   const seen: Parameters<AccountRpc["setCredential"]>[0][] = [];
   const account: AccountRpc = { ...rpc, setCredential: async (c) => { seen.push(c); await rpc.setCredential(c); } };
   const fake = createFakeOAuth();
+  const identities = createMemoryKv();
   const call = (path: string, init: RequestInit & { token?: string | null } = {}) => {
     const headers = new Headers(init.headers);
     const token = init.token === undefined ? ADMIN_TOKEN : init.token;
     if (token !== null) headers.set("authorization", `Bearer ${token}`);
-    return handleAdmin(new Request(`${ORIGIN}${path}`, { ...init, headers }), env, { account: () => account, oauth: () => fake.oauth });
+    return handleAdmin(new Request(`${ORIGIN}${path}`, { ...init, headers }), env, { account: () => account, oauth: () => fake.oauth, identities: () => identities });
   };
-  return { call, seen, fake, account };
+  return { call, seen, fake, account, identities };
 }
 
 const CRED = { accessToken: "SKY-AT-secret", refreshToken: "SKY-RT-secret", expiresAt: Date.now() + 3_600_000, fingerprint: "fp-123" };
@@ -134,4 +136,16 @@ test("unknown admin paths and methods", async () => {
   const { call } = setup();
   assert.equal((await call("/admin/other")).status, 404);
   assert.equal((await call(ADMIN_CREDENTIAL_PATH, { method: "POST", body: "{}" })).status, 405);
+});
+
+test("DELETE /admin/identity clears a family member's Google binding (lower-cased email)", async () => {
+  const { call, identities } = setup();
+  await bindIdentity(identities, "wife@example.com", "google-sub-w");
+  assert.deepEqual(await (await call(`${ADMIN_IDENTITY_PATH}?email=Wife@Example.com`, { method: "DELETE" })).json(), { email: "wife@example.com", removed: true });
+  assert.equal(identities.data.has(identityKey("wife@example.com")), false);
+  assert.deepEqual(await (await call(`${ADMIN_IDENTITY_PATH}?email=wife@example.com`, { method: "DELETE" })).json(), { email: "wife@example.com", removed: false });
+  assert.equal((await call(`${ADMIN_IDENTITY_PATH}?email=${encodeURIComponent("w\u0456fe@example.com")}`, { method: "DELETE" })).status, 400, "non-ASCII email");
+  assert.equal((await call(ADMIN_IDENTITY_PATH, { method: "DELETE" })).status, 400);
+  assert.equal((await call(`${ADMIN_IDENTITY_PATH}?email=wife@example.com`)).status, 405);
+  assert.equal((await call(`${ADMIN_IDENTITY_PATH}?email=wife@example.com`, { method: "DELETE", token: "wrong" })).status, 401);
 });

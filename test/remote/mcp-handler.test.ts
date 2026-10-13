@@ -27,7 +27,7 @@ async function setup(routes: MockRoute[] = [], opts: { signedIn?: boolean; accou
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
-    }), env, who === null ? {} : { props: { email: who, name: "Someone" } });
+    }), env, who === null ? {} : { props: { email: who, name: "Someone", sub: `sub-${who}` } });
     return res;
   };
   const tool = async (name: string, args: Record<string, unknown> = {}, who?: string) => {
@@ -168,7 +168,7 @@ test("each person's calls count against their own rate limit", async () => {
 test("GET and DELETE on /mcp are 405 (stateless JSON server, no SSE stream or session)", async () => {
   const { handler } = await setup();
   for (const method of ["GET", "DELETE"]) {
-    const res = await handler.fetch(new Request(`${ORIGIN}/mcp`, { method }), ENV, { props: { email: "jordan@example.com", name: "J" } });
+    const res = await handler.fetch(new Request(`${ORIGIN}/mcp`, { method }), ENV, { props: { email: "jordan@example.com", name: "J", sub: "sub-j" } });
     assert.equal(res.status, 405);
     assert.equal(res.headers.get("allow"), "POST");
   }
@@ -182,4 +182,14 @@ test("SKYLIGHT_TOOLSETS trims the remote tool list but keeps auth status and rec
   assert.ok(names.includes("skylight_recent_activity"));
   assert.ok(names.includes("skylight_create_list"));
   assert.ok(!names.includes("skylight_create_chore"));
+});
+
+test("a grant without a Google sub (from before identity binding) must reconnect", async () => {
+  const { handler } = await setup();
+  const res = await handler.fetch(new Request(`${ORIGIN}/mcp`, {
+    method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  }), ENV, { props: { email: "jordan@example.com", name: "J" } });
+  assert.equal(res.status, 403);
+  assert.match(await res.text(), /Reconnect the app/);
 });

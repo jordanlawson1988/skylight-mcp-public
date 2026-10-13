@@ -3,6 +3,7 @@ import { timingSafeEqualText } from "../skylight/encoding.js";
 import type { AccountRpc } from "./account-core.js";
 import type { RemoteEnv } from "./env.js";
 import type { OAuthApi } from "./google.js";
+import { clearIdentity, isPlainEmail, type IdentityKv } from "./identity.js";
 
 /**
  * /admin/* for the Mac CLI (`skylight-mcp remote login|status|logout|revoke`). Every route needs
@@ -12,6 +13,7 @@ import type { OAuthApi } from "./google.js";
 
 export const ADMIN_CREDENTIAL_PATH = "/admin/skylight-credential";
 export const ADMIN_GRANTS_PATH = "/admin/grants";
+export const ADMIN_IDENTITY_PATH = "/admin/identity";
 const MAX_BODY_BYTES = 16 * 1024;
 const MIN_ADMIN_TOKEN_LENGTH = 32;
 
@@ -30,6 +32,8 @@ export type CredentialBody = z.infer<typeof CredentialBody>;
 export interface AdminDeps {
   account(env: RemoteEnv): AccountRpc;
   oauth(env: RemoteEnv): Pick<OAuthApi, "listUserGrants" | "revokeGrant">;
+  /** Email to Google sub bindings (OAUTH_KV). */
+  identities(env: RemoteEnv): IdentityKv;
 }
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
@@ -46,7 +50,11 @@ export async function isAdminRequest(request: Request, expected: string): Promis
   return match !== null && same;
 }
 
-const EMAIL = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+/** The ?email= of /admin/grants and /admin/identity, lower-cased, or null when it is not a plain email. */
+function emailParam(url: URL): string | null {
+  const email = (url.searchParams.get("email") ?? "").trim().toLowerCase();
+  return isPlainEmail(email) ? email : null;
+}
 
 async function readJsonBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; response: Response }> {
   const declared = Number(request.headers.get("content-length") ?? "0");
@@ -85,8 +93,8 @@ export async function handleAdmin(request: Request, env: RemoteEnv, deps: AdminD
   }
   if (url.pathname === ADMIN_GRANTS_PATH) {
     if (request.method !== "DELETE") return json(405, { error: "method_not_allowed" }, { Allow: "DELETE" });
-    const email = (url.searchParams.get("email") ?? "").trim().toLowerCase();
-    if (!EMAIL.test(email)) return json(400, { error: "email_required" });
+    const email = emailParam(url);
+    if (email === null) return json(400, { error: "email_required" });
     const oauth = deps.oauth(env);
     // List every page first, then revoke: deleting while paging could skip grants.
     const ids: string[] = [];
@@ -99,6 +107,12 @@ export async function handleAdmin(request: Request, env: RemoteEnv, deps: AdminD
     }
     for (const id of ids) await oauth.revokeGrant(id, email);
     return json(200, { email, revoked: ids.length });
+  }
+  if (url.pathname === ADMIN_IDENTITY_PATH) {
+    if (request.method !== "DELETE") return json(405, { error: "method_not_allowed" }, { Allow: "DELETE" });
+    const email = emailParam(url);
+    if (email === null) return json(400, { error: "email_required" });
+    return json(200, { email, removed: await clearIdentity(deps.identities(env), email) });
   }
   return json(404, { error: "not_found" });
 }

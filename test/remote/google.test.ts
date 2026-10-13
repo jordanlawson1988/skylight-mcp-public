@@ -7,6 +7,7 @@ import {
 } from "../../src/remote/google.js";
 import type { RemoteEnv } from "../../src/remote/env.js";
 import { createFakeOAuth } from "../helpers/fake-oauth.js";
+import { createMemoryKv } from "../helpers/memory-kv.js";
 import { createMockFetch, type MockRoute } from "../helpers/mock-fetch.js";
 
 const CLIENT_ID = "google-client.apps.googleusercontent.com";
@@ -49,8 +50,8 @@ test("buildGoogleAuthUrl asks for openid email profile with PKCE S256, state, no
 });
 
 test("verifyIdTokenClaims accepts Google's token and returns the lower-cased email", () => {
-  assert.deepEqual(verifyIdTokenClaims(claims(), { clientId: CLIENT_ID, now: NOW }), { email: "jordan@example.com", name: "Jordan" });
-  assert.deepEqual(verifyIdTokenClaims(claims({ iss: "accounts.google.com", name: undefined }), { clientId: CLIENT_ID, now: NOW }), { email: "jordan@example.com", name: "jordan@example.com" });
+  assert.deepEqual(verifyIdTokenClaims(claims(), { clientId: CLIENT_ID, now: NOW }), { email: "jordan@example.com", name: "Jordan", sub: "123" });
+  assert.deepEqual(verifyIdTokenClaims(claims({ iss: "accounts.google.com", name: undefined }), { clientId: CLIENT_ID, now: NOW }), { email: "jordan@example.com", name: "jordan@example.com", sub: "123" });
   assert.equal(verifyIdTokenClaims(claims({ email_verified: "true", nonce: "N" }), { clientId: CLIENT_ID, now: NOW, nonce: "N" }).email, "jordan@example.com");
 });
 
@@ -117,7 +118,7 @@ test("a failed Google exchange never repeats the response body or the secret", a
 async function startFlow(env: RemoteEnv = ENV, routes: MockRoute[] = []) {
   const fake = createFakeOAuth();
   const { fetch, calls } = createMockFetch(routes);
-  const deps = { oauth: fake.oauth, env, fetch, now: () => NOW };
+  const deps = { oauth: fake.oauth, env, fetch, now: () => NOW, identities: createMemoryKv() };
   const page = await handleAuthorize(new Request(`${ORIGIN}/authorize?client_id=client-1`), deps);
   return { fake, deps, page, calls };
 }
@@ -186,7 +187,7 @@ test("an allowlisted, verified Google account completes the MCP authorization as
   const { out, fake, calls } = await callbackWith(claims());
   assert.equal(out.status, 302);
   assert.match(out.headers.get("location") ?? "", /^https:\/\/claude\.ai\/api\/mcp\/auth_callback\?code=MCP-CODE/);
-  assert.deepEqual(fake.completed, [{ userId: "jordan@example.com", scope: ["skylight"], props: { email: "jordan@example.com", name: "Jordan" }, metadata: { label: "Jordan" } }]);
+  assert.deepEqual(fake.completed, [{ userId: "jordan@example.com", scope: ["skylight"], props: { email: "jordan@example.com", name: "Jordan", sub: "123" }, metadata: { label: "Jordan" } }]);
   assert.equal((calls[0]!.body as Record<string, string>).code, "G-CODE");
 });
 
@@ -231,16 +232,16 @@ test("a server without its Google settings says it is not set up instead of star
 
 test("an invalid authorization request is rendered locally, or redirected only when the library vouches for the redirect", async () => {
   const local = createFakeOAuth({ parseError: Object.assign(new Error("bad"), { name: "AuthorizationError", code: "invalid_request", description: "Unknown <client>" }) });
-  const res = await handleAuthorize(new Request(`${ORIGIN}/authorize`), { oauth: local.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => NOW });
+  const res = await handleAuthorize(new Request(`${ORIGIN}/authorize`), { oauth: local.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => NOW, identities: createMemoryKv() });
   assert.equal(res.status, 400);
   assert.ok((await res.text()).includes("Unknown &lt;client&gt;"));
   const redirect = createFakeOAuth({ parseError: Object.assign(new Error("bad"), { name: "AuthorizationError", code: "invalid_scope", description: "nope", redirectUri: "https://claude.ai/api/mcp/auth_callback", state: "s", issuer: "https://example.test" }) });
-  const r2 = await handleAuthorize(new Request(`${ORIGIN}/authorize`), { oauth: redirect.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => NOW });
+  const r2 = await handleAuthorize(new Request(`${ORIGIN}/authorize`), { oauth: redirect.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => NOW, identities: createMemoryKv() });
   assert.equal(r2.status, 302);
   const to = new URL(r2.headers.get("location")!);
   assert.equal(to.searchParams.get("error"), "invalid_scope");
   assert.equal(to.searchParams.get("iss"), "https://example.test");
   const unknown = createFakeOAuth({ client: null });
-  const r3 = await handleAuthorize(new Request(`${ORIGIN}/authorize`), { oauth: unknown.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => NOW });
+  const r3 = await handleAuthorize(new Request(`${ORIGIN}/authorize`), { oauth: unknown.oauth, env: ENV, fetch: createMockFetch([]).fetch, now: () => NOW, identities: createMemoryKv() });
   assert.equal(r3.status, 400);
 });

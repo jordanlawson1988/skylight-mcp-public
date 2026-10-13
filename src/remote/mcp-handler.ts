@@ -43,8 +43,9 @@ function jsonRpcError(status: number, message: string, headers: Record<string, s
 function familyMember(props: unknown): FamilyProps | null {
   if (typeof props !== "object" || props === null) return null;
   const p = props as Record<string, unknown>;
-  if (typeof p.email !== "string" || p.email === "") return null;
-  return { email: p.email.toLowerCase(), name: typeof p.name === "string" ? p.name : p.email };
+  // A grant without the Google sub predates identity binding: reconnecting issues one with it.
+  if (typeof p.email !== "string" || p.email === "" || typeof p.sub !== "string" || p.sub === "") return null;
+  return { email: p.email.toLowerCase(), name: typeof p.name === "string" ? p.name : p.email, sub: p.sub };
 }
 
 async function remoteAuthStatus(account: AccountRpc, config: SkylightConfig, frames: FrameResolver): Promise<AuthStatusReport> {

@@ -1,6 +1,7 @@
 import { base64ToBytes, bytesToBase64Url, randomBytes } from "../skylight/encoding.js";
 import { pkceChallenge } from "../skylight/oauth.js";
 import { MCP_SCOPE, type RemoteEnv } from "./env.js";
+import { bindIdentity, isPlainEmail, type IdentityKv } from "./identity.js";
 import { isAllowedCimdClientId, isAllowedRedirectUri, isCimdClientId } from "./redirects.js";
 
 /**
@@ -56,8 +57,8 @@ export interface OAuthApi {
   revokeGrant(grantId: string, userId: string): Promise<void>;
 }
 
-/** What /callback stores in ctx.props for the MCP handler: the signed-in family member. */
-export interface FamilyProps { email: string; name: string }
+/** What /callback stores in ctx.props for the MCP handler: the signed-in family member and their Google account id. */
+export interface FamilyProps { email: string; name: string; sub: string }
 
 interface AuthorizationErrorLike { name: "AuthorizationError"; code: string; description: string; redirectUri?: string; state?: string; issuer?: string }
 
@@ -71,19 +72,17 @@ function isCimdFetchError(e: unknown): boolean {
 
 // ---- pure helpers ----
 
-const EMAIL = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
-
 /** ALLOWED_EMAILS: comma-separated, trimmed, lower-cased, de-duplicated. An empty or malformed list is a setup error. */
 export function parseAllowlist(secret: string | undefined): string[] {
   const emails = [...new Set((secret ?? "").split(",").map((e) => e.trim().toLowerCase()).filter((e) => e !== ""))];
   if (emails.length === 0) throw new Error("ALLOWED_EMAILS must list at least one email.");
-  const bad = emails.filter((e) => !EMAIL.test(e));
+  const bad = emails.filter((e) => !isPlainEmail(e));
   if (bad.length > 0) throw new Error("ALLOWED_EMAILS must be a comma-separated list of email addresses.");
   return emails;
 }
 
 export function isAllowed(email: string, emailVerified: boolean, allowlist: readonly string[]): boolean {
-  if (!emailVerified || typeof email !== "string" || email === "") return false;
+  if (!emailVerified || typeof email !== "string" || !isPlainEmail(email.trim())) return false;
   return allowlist.includes(email.trim().toLowerCase());
 }
 
@@ -121,10 +120,11 @@ export function verifyIdTokenClaims(claims: Record<string, unknown>, o: { client
   if (typeof claims.exp !== "number" || !(claims.exp * 1000 > o.now)) throw new Error("ID token expired.");
   if (o.nonce !== undefined && claims.nonce !== o.nonce) throw new Error("ID token nonce does not match.");
   if (claims.email_verified !== true && claims.email_verified !== "true") throw new Error("Google email is not verified.");
-  if (typeof claims.email !== "string" || !EMAIL.test(claims.email.trim())) throw new Error("ID token has no email.");
+  if (typeof claims.email !== "string" || !isPlainEmail(claims.email.trim())) throw new Error("ID token has no plain email.");
+  if (typeof claims.sub !== "string" || !/^[\x21-\x7E]{1,255}$/.test(claims.sub)) throw new Error("ID token has no subject.");
   const email = claims.email.trim().toLowerCase();
   const name = typeof claims.name === "string" && claims.name.trim() !== "" ? claims.name.trim().slice(0, 100) : email;
-  return { email, name };
+  return { email, name, sub: claims.sub };
 }
 
 export async function exchangeGoogleCode(o: {
@@ -209,6 +209,8 @@ export interface GoogleDeps {
   env: RemoteEnv;
   fetch: typeof globalThis.fetch;
   now: () => number;
+  /** Email to Google sub bindings (OAUTH_KV on the Worker). */
+  identities: IdentityKv;
 }
 
 const NOT_SET_UP = "This server has not finished setting up Google sign-in. Jordan needs to add its Google settings.";
@@ -346,8 +348,10 @@ export async function handleCallback(request: Request, deps: GoogleDeps): Promis
     return messagePage(403, "Not on the family list", FAMILY_LIST_MESSAGE, resumed.headers);
   }
   if (!isAllowed(who.email, true, settings.allowlist)) return messagePage(403, "Not on the family list", FAMILY_LIST_MESSAGE, resumed.headers);
+  // The first sign-in binds the email to this Google account; another account presenting the same email is refused.
+  if (!(await bindIdentity(deps.identities, who.email, who.sub))) return messagePage(403, "Not on the family list", FAMILY_LIST_MESSAGE, resumed.headers);
 
-  const props: FamilyProps = { email: who.email, name: who.name };
+  const props: FamilyProps = { email: who.email, name: who.name, sub: who.sub };
   const { redirectTo } = await deps.oauth.completeAuthorization({ request: original, userId: who.email, metadata: { label: who.name }, scope: [MCP_SCOPE], props });
   return redirect(redirectTo, resumed.headers);
 }
