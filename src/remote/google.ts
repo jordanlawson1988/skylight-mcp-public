@@ -235,7 +235,8 @@ function redirect(location: string, headers?: Headers): Response {
 /** Errors from parseAuthRequest: redirect only when the library has validated the client's redirect URI. */
 function authorizeError(e: unknown): Response {
   if (isAuthorizationError(e)) {
-    if (e.redirectUri) {
+    // Even a library-validated redirect is used only when it is on our allowlist; anything else is shown here.
+    if (e.redirectUri && isAllowedRedirectUri(e.redirectUri)) {
       const to = new URL(e.redirectUri);
       to.searchParams.set("error", e.code);
       to.searchParams.set("error_description", e.description);

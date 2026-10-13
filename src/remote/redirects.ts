@@ -31,16 +31,22 @@ export function isAllowedRedirectUri(uri: unknown): boolean {
   return false;
 }
 
-/** A CIMD client_id is an https URL; a dynamically registered one is an opaque string. */
+/**
+ * URL-shaped client ids: anything containing "://", in any case. The library treats an id whose scheme is https in
+ * any case (HTTPS://, hTtPs://) as a Client ID Metadata Document URL, so this errs wide: every URL-shaped id has to
+ * pass isAllowedCimdClientId, and only opaque ids (dynamic registration) skip it.
+ */
 export function isCimdClientId(clientId: string): boolean {
-  return clientId.startsWith("https://") || clientId.startsWith("http://");
+  return typeof clientId === "string" && clientId.includes("://");
 }
 
+/** An https URL (scheme in any case, written with "://") on one of CIMD_CLIENT_HOSTS, compared after URL parsing. */
 export function isAllowedCimdClientId(clientId: string): boolean {
+  if (typeof clientId !== "string" || !/^https:\/\//i.test(clientId)) return false;
   let url: URL;
   try { url = new URL(clientId); } catch { return false; }
   return url.protocol === "https:" && url.username === "" && url.password === "" && url.port === ""
-    && (CIMD_CLIENT_HOSTS as readonly string[]).includes(url.hostname);
+    && (CIMD_CLIENT_HOSTS as readonly string[]).includes(url.hostname.toLowerCase());
 }
 
 /**
