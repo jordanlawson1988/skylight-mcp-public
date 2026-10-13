@@ -86,13 +86,24 @@ export class AccountCore {
   private readonly opts: AccountCoreOpts;
   private key: Promise<AesKey> | null = null;
   private inflight: Promise<string> | null = null;
-  /** Bumped by setCredential and clearCredential, so an in-flight refresh of the old grant never overwrites a new one. */
-  private generation = 0;
+  /** Orders refreshes, new sign-ins and sign-outs, so a refresh of an old grant can never land after a new grant. */
+  private credentialQueue: Promise<unknown> = Promise.resolve();
+  /** Orders audit and rate-limit read-modify-write steps (separate, so a slow refresh never delays them). */
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(opts: AccountCoreOpts) {
     this.opts = opts;
     this.storage = opts.storage;
+  }
+
+  /**
+   * Runs `fn` after everything already queued on that chain (the Durable Object interleaves calls while one awaits a
+   * fetch; Node tests interleave freely). A failure does not block the next caller.
+   */
+  private serialized<T>(chain: "queue" | "credentialQueue", fn: () => Promise<T>): Promise<T> {
+    const run = this[chain].then(fn, fn);
+    this[chain] = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   // ---- Skylight credential ----
@@ -113,17 +124,20 @@ export class AccountCore {
   async setCredential(credential: OAuthCredential): Promise<void> {
     if (!isCredential(credential)) throw new AuthError("Refusing to store a malformed Skylight credential.");
     const clean: OAuthCredential = { version: 1, accessToken: credential.accessToken, refreshToken: credential.refreshToken, fingerprint: credential.fingerprint, expiresAt: credential.expiresAt };
-    this.generation += 1;
-    await this.writeCredential(clean);
-    await this.storage.delete(KEYS.needsLogin);
+    await this.cryptoKey(); // a bad SKYLIGHT_TOKEN_KEY fails here, before waiting on anything
+    return this.serialized("credentialQueue", async () => {
+      await this.writeCredential(clean);
+      await this.storage.delete(KEYS.needsLogin);
+    });
   }
 
-  async clearCredential(): Promise<boolean> {
-    this.generation += 1;
-    const existed = (await this.storage.get(KEYS.credential)) !== null;
-    await this.storage.delete(KEYS.credential);
-    await this.storage.delete(KEYS.needsLogin);
-    return existed;
+  clearCredential(): Promise<boolean> {
+    return this.serialized("credentialQueue", async () => {
+      const existed = (await this.storage.get(KEYS.credential)) !== null;
+      await this.storage.delete(KEYS.credential);
+      await this.storage.delete(KEYS.needsLogin);
+      return existed;
+    });
   }
 
   async status(): Promise<AccountStatus> {
@@ -146,12 +160,13 @@ export class AccountCore {
     return c;
   }
 
-  /** One refresh at a time; concurrent callers share it. Skips the refresh if another caller already rotated the token. */
+  /**
+   * One refresh at a time; concurrent callers share it. It runs under the credential lock and re-reads the credential
+   * there, so it skips the refresh when another caller (or a new sign-in) already replaced the token.
+   */
   private refreshIfStillCurrent(seen: OAuthCredential, stillStale: (c: OAuthCredential) => boolean): Promise<string> {
     if (this.inflight) return this.inflight;
-    const run = (async () => {
-      // Taken before any await: a setCredential or clearCredential from here on wins over this refresh.
-      const generation = this.generation;
+    const run = this.serialized("credentialQueue", async () => {
       const current = await this.usableCredential();
       if (current.refreshToken !== seen.refreshToken || !stillStale(current)) return current.accessToken;
       let fresh: OAuthCredential;
@@ -162,18 +177,14 @@ export class AccountCore {
         });
       } catch (e) {
         if (e instanceof AuthError && e.code === "session_expired") {
-          if (generation === this.generation) await this.storage.put(KEYS.needsLogin, "1");
+          await this.storage.put(KEYS.needsLogin, "1");
           throw new AuthError(ACCOUNT_MESSAGES.expired, "session_expired");
         }
         throw e;
       }
-      if (generation !== this.generation) {
-        // A new credential arrived (remote login) while this refresh ran: keep the new one.
-        return (await this.usableCredential()).accessToken;
-      }
       await this.writeCredential(fresh);
       return fresh.accessToken;
-    })();
+    });
     this.inflight = run;
     const clear = () => { if (this.inflight === run) this.inflight = null; };
     run.then(clear, clear);
@@ -223,7 +234,7 @@ export class AccountCore {
   // ---- audit log (a ring of numbered keys between tail and head) ----
 
   appendAudit(record: AuditRecord): Promise<void> {
-    return this.exclusive(async () => {
+    return this.serialized("queue", async () => {
       const clean = sanitizeAudit(record);
       let head = Number((await this.storage.get(KEYS.auditHead)) ?? "0");
       let tail = Number((await this.storage.get(KEYS.auditTail)) ?? "0");
@@ -259,7 +270,7 @@ export class AccountCore {
   // ---- rate limits (fixed windows) ----
 
   allow(who: string, bucket: RateBucket): Promise<boolean> {
-    return this.exclusive(async () => {
+    return this.serialized("queue", async () => {
       const { limit, windowMs } = RATE_LIMITS[bucket];
       const key = KEYS.rate(bucket, who.slice(0, 320));
       const window = Math.floor(this.opts.now() / windowMs);
@@ -270,13 +281,6 @@ export class AccountCore {
       await this.storage.put(key, JSON.stringify({ w: window, n: count + 1 }));
       return true;
     });
-  }
-
-  /** Runs read-modify-write steps one after another (the Durable Object gives this too; Node tests need it). */
-  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn);
-    this.queue = run.then(() => undefined, () => undefined);
-    return run;
   }
 }
 

@@ -152,6 +152,18 @@ test("invalid_grant (400 or 401) marks needsLogin, keeps the credential and stop
   }
 });
 
+test("an invalid_grant refresh racing a new sign-in never leaves needsLogin set on the new grant", async () => {
+  for (let i = 0; i < 10; i++) {
+    const { core } = setup([tokenRoute({ error: "invalid_grant" }, 400)]);
+    await core.setCredential(cred({ expiresAt: T0 - 1 }));
+    const pending = core.getAccessToken().catch((e: unknown) => e);
+    await core.setCredential(cred({ accessToken: "AT-NEWGRANT", refreshToken: "RT-NEWGRANT" }));
+    await pending;
+    assert.equal((await core.status()).needsLogin, false);
+    assert.equal(await core.getAccessToken(), "AT-NEWGRANT");
+  }
+});
+
 test("a new credential clears needsLogin", async () => {
   const { core } = setup([tokenRoute({ error: "invalid_grant" }, 400)]);
   await core.setCredential(cred({ expiresAt: T0 - 1 }));
@@ -169,7 +181,8 @@ test("a transient refresh failure names the remote login command and does not ma
 });
 
 test("a credential set while a refresh is in flight is not overwritten by that refresh", async () => {
-  // (Also covered for every interleaving by capturing the generation before the refresh's first await.)
+  // The refresh and the new sign-in are ordered by one lock: the refresh finishes (its caller gets a valid token of the
+  // old grant), then the new sign-in is written and wins.
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
   const { fetch: inner } = createMockFetch([tokenRoute({ access_token: "AT-OLDGRANT", refresh_token: "RT-OLDGRANT", expires_in: 3600 })]);
@@ -180,20 +193,22 @@ test("a credential set while a refresh is in flight is not overwritten by that r
   await core.setCredential(cred({ expiresAt: T0 - 1 }));
   const pending = core.getAccessToken();
   await inFetch;
-  await core.setCredential(cred({ accessToken: "AT-NEWGRANT", refreshToken: "RT-NEWGRANT" }));
+  const signingIn = core.setCredential(cred({ accessToken: "AT-NEWGRANT", refreshToken: "RT-NEWGRANT" }));
   release();
-  assert.equal(await pending, "AT-NEWGRANT");
+  await signingIn;
+  assert.equal(await pending, "AT-OLDGRANT");
   assert.equal(await core.getAccessToken(), "AT-NEWGRANT");
+  assert.equal((await core.status()).needsLogin, false);
 });
 
-test("a credential set in the same tick as a refresh starts still wins", async () => {
+test("a credential set in the same tick as a refresh starts is what stays stored", async () => {
   for (let i = 0; i < 20; i++) {
     const { core } = setup([tokenRoute({ access_token: "AT-OLDGRANT", refresh_token: "RT-OLDGRANT", expires_in: 3600 })]);
     await core.setCredential(cred({ expiresAt: T0 - 1 }));
     const pending = core.getAccessToken();
     await core.setCredential(cred({ accessToken: "AT-NEWGRANT", refreshToken: "RT-NEWGRANT" }));
-    assert.equal(await pending, "AT-NEWGRANT");
-    assert.equal(await core.getAccessToken(), "AT-NEWGRANT");
+    assert.ok(["AT-NEWGRANT", "AT-OLDGRANT"].includes(await pending));
+    assert.equal(await core.getAccessToken(), "AT-NEWGRANT", "the new sign-in is what stays stored");
   }
 });
 
