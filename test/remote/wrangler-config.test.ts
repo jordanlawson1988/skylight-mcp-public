@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { IP_RATE_LIMITS, RATE_LIMIT_PERIOD_SECONDS } from "../../src/remote/edge-guard.js";
+import { GLOBAL_RATE_LIMITS, IP_RATE_LIMITS, RATE_LIMIT_PERIOD_SECONDS } from "../../src/remote/edge-guard.js";
 import { ACCOUNT_OBJECT_NAME, REMOTE_SECRETS } from "../../src/remote/env.js";
 
 /** Strips // and /* *\/ comments outside strings, then parses (wrangler.jsonc has no trailing commas). */
@@ -67,8 +67,8 @@ test("every environment repeats the Durable Object, its SQLite migration, the KV
   assert.equal(config.env.production.workers_dev, true);
 });
 
-test("every environment has the four per-IP rate limiters with IP_RATE_LIMITS' numbers and its own namespace ids", () => {
-  const expected = Object.values(IP_RATE_LIMITS).map((r) => ({ name: r.binding, limit: r.limit, period: RATE_LIMIT_PERIOD_SECONDS })).sort((a, b) => a.name.localeCompare(b.name));
+test("every environment has the per-client and global rate limiters with edge-guard's numbers and its own namespace ids", () => {
+  const expected = [...Object.values(IP_RATE_LIMITS), ...Object.values(GLOBAL_RATE_LIMITS)].map((r) => ({ name: r.binding, limit: r.limit, period: RATE_LIMIT_PERIOD_SECONDS })).sort((a, b) => a.name.localeCompare(b.name));
   const ids: string[] = [];
   for (const [label, env] of [["top", config], ["staging", config.env.staging], ["production", config.env.production]] as const) {
     const got = env.ratelimits.map((r) => ({ name: r.name, limit: r.simple.limit, period: r.simple.period })).sort((a, b) => a.name.localeCompare(b.name));

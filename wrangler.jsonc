@@ -38,12 +38,14 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SkylightAccount"] }],
   "kv_namespaces": [{ "binding": "OAUTH_KV" }],
-  // Per-IP limits per minute; the same numbers as IP_RATE_LIMITS in src/remote/edge-guard.ts (a test checks them).
+  // Per-client limits per minute (IPv4 address or IPv6 /64), plus RL_REGISTER_GLOBAL, one budget for /register across
+  // all clients; the same numbers as IP_RATE_LIMITS and GLOBAL_RATE_LIMITS in src/remote/edge-guard.ts (a test checks them).
   "ratelimits": [
     { "name": "RL_REGISTER", "namespace_id": "3001", "simple": { "limit": 5, "period": 60 } },
     { "name": "RL_AUTHORIZE", "namespace_id": "3002", "simple": { "limit": 20, "period": 60 } },
     { "name": "RL_CALLBACK", "namespace_id": "3003", "simple": { "limit": 20, "period": 60 } },
-    { "name": "RL_TOKEN", "namespace_id": "3004", "simple": { "limit": 60, "period": 60 } }
+    { "name": "RL_TOKEN", "namespace_id": "3004", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_REGISTER_GLOBAL", "namespace_id": "3005", "simple": { "limit": 20, "period": 60 } }
   ],
   "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" },
   "secrets": { "required": ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] },
@@ -61,7 +63,8 @@
         { "name": "RL_REGISTER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } },
         { "name": "RL_AUTHORIZE", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } },
         { "name": "RL_CALLBACK", "namespace_id": "1003", "simple": { "limit": 20, "period": 60 } },
-        { "name": "RL_TOKEN", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } }
+        { "name": "RL_TOKEN", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_REGISTER_GLOBAL", "namespace_id": "1005", "simple": { "limit": 20, "period": 60 } }
       ],
       "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" },
       "secrets": { "required": ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] }
@@ -79,7 +82,8 @@
         { "name": "RL_REGISTER", "namespace_id": "2001", "simple": { "limit": 5, "period": 60 } },
         { "name": "RL_AUTHORIZE", "namespace_id": "2002", "simple": { "limit": 20, "period": 60 } },
         { "name": "RL_CALLBACK", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } },
-        { "name": "RL_TOKEN", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } }
+        { "name": "RL_TOKEN", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_REGISTER_GLOBAL", "namespace_id": "2005", "simple": { "limit": 20, "period": 60 } }
       ],
       "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" },
       "secrets": { "required": ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] }

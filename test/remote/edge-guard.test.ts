@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { edgeGuard, IP_RATE_LIMITS, RATE_LIMIT_PERIOD_SECONDS, type EdgeEnv, type RateLimiterLike } from "../../src/remote/edge-guard.js";
+import { edgeGuard, GLOBAL_RATE_LIMITS, IP_RATE_LIMITS, RATE_LIMIT_PERIOD_SECONDS, type EdgeEnv, type RateLimiterLike } from "../../src/remote/edge-guard.js";
 
 const ORIGIN = "https://skylight-mcp-staging.example.workers.dev";
 
@@ -17,7 +17,7 @@ function limiter(limit: number) {
 function env(): { env: EdgeEnv; keys: Record<string, string[]> } {
   const out: EdgeEnv = {};
   const keys: Record<string, string[]> = {};
-  for (const { binding, limit } of Object.values(IP_RATE_LIMITS)) {
+  for (const { binding, limit } of [...Object.values(IP_RATE_LIMITS), ...Object.values(GLOBAL_RATE_LIMITS)]) {
     const { l, keys: k } = limiter(limit);
     out[binding] = l;
     keys[binding] = k;
