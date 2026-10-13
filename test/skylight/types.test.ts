@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mapProfile, mapProfiles, mapChores, mapRewardPoints, mapRewards, mapReward, mapRewardResponse, mapLists, mapList, mapListItems, mapEvents, mapEvent, mapMealCategories, mapRecipes, mapRecipeResponse, parseRecipeDescription, mapSittings, explodeSittings, mapAlbums, mapPhotoPage, mapPhoto, mapDevices, mapDevice, mapFrame, mapFrameUsers, mapAccount, mapPlusSubscriptions, mapDefaultGroceryList } from "../../src/skylight/types.js";
+import { mapProfile, mapProfiles, mapChores, mapRewardPoints, mapRewards, mapReward, mapRewardResponse, mapLists, mapList, mapListItems, mapEvents, mapEvent, mapMealCategories, mapRecipes, mapRecipeResponse, parseRecipeDescription, mapSittings, explodeSittings, mapAlbums, mapPhotoPage, mapPhoto, photosCarryOwner, mapDevices, mapDevice, mapFrame, mapFrameUsers, mapAccount, mapPlusSubscriptions, mapDefaultGroceryList } from "../../src/skylight/types.js";
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url), "utf8"));
 
@@ -334,4 +334,49 @@ test("mapDefaultGroceryList finds the list flagged default_grocery_list", () => 
   assert.deepEqual(mapDefaultGroceryList(lists), { id: "2", title: "Groceries" });
   assert.equal(mapDefaultGroceryList({ data: [{ id: "1", attributes: { label: "x" } }] }), null);
   assert.equal(mapDefaultGroceryList(null), null);
+});
+
+const message = (attributes: Record<string, unknown>) => ({ id: "9", type: "message_asset", attributes: { asset_type: "photo", created_at: "2026-07-10T18:27:09.554Z", caption: "", comments_count: 0, ...attributes } });
+
+test("mapPhoto shows \"you\" for a photo the frame owner sent, never the owner's email, and the email of anyone else", () => {
+  const mine = mapPhoto(message({ from_email: "owner@example.invalid", sender_id: 12311021, frame_owner_id: 12311021 }));
+  assert.equal(mine!.from, "you");
+  assert.ok(!JSON.stringify(mine).includes("owner@example.invalid"));
+  assert.equal(mapPhoto(message({ from_email: "aunt@example.invalid", sender_id: 13293082, frame_owner_id: 12311021 }))!.from, "aunt@example.invalid");
+  // numeric and string ids compare equal
+  assert.equal(mapPhoto(message({ from_email: "owner@example.invalid", sender_id: "12311021", frame_owner_id: 12311021 }))!.from, "you");
+});
+
+test("mapPhoto falls back to the owner id it is given when the message has no frame_owner_id, and withholds the sender when the owner cannot be told", () => {
+  const raw = message({ from_email: "owner@example.invalid", sender_id: 12311021 });
+  assert.equal(mapPhoto(raw, "12311021")!.from, "you");
+  assert.equal(mapPhoto(message({ from_email: "aunt@example.invalid", sender_id: 13293082 }), "12311021")!.from, "aunt@example.invalid");
+  assert.equal(mapPhoto(raw)!.from, null, "owner unknown: the email is withheld rather than risk returning the owner's");
+  assert.equal(mapPhoto(raw, null)!.from, null);
+  assert.equal(mapPhoto(message({ from_email: "owner@example.invalid", frame_owner_id: 12311021 }))!.from, null, "no sender_id: cannot tell who sent it");
+  assert.equal(mapPhoto(message({ sender_id: 1, frame_owner_id: 2 }))!.from, null, "no email at all");
+  // the message's own frame_owner_id wins over the fallback
+  assert.equal(mapPhoto(message({ from_email: "owner@example.invalid", sender_id: 12311021, frame_owner_id: 12311021 }), "999")!.from, "you");
+});
+
+test("photosCarryOwner says whether every message names the frame owner", () => {
+  assert.equal(photosCarryOwner(fixture("messages")), true);
+  assert.equal(photosCarryOwner({ data: [message({ frame_owner_id: 1 }), message({})] }), false);
+  assert.equal(photosCarryOwner({ data: [] }), true);
+  assert.equal(photosCarryOwner(null), true);
+});
+
+test("mapPhotoPage threads the fallback owner id through every photo", () => {
+  const json = { data: [message({ from_email: "owner@example.invalid", sender_id: 7 }), message({ from_email: "aunt@example.invalid", sender_id: 8 })], meta: { current_page: 1, num_pages: 1 } };
+  assert.deepEqual(mapPhotoPage(json, 1, "7").photos.map((p) => p.from), ["you", "aunt@example.invalid"]);
+});
+
+test("parseRecipeDescription accepts -, * and • bullets for ingredients and 1. / 1) numbering (or bullets) for instructions", () => {
+  const text = "Ingredients:\n- 2 eggs\n* 1 cup flour\n• pinch of salt\n•\u00a0no-break space\n-not a bullet\n*bold* text\n**Heading-ish**\n\nInstructions:\n1. Mix\n2) Bake\n3.  Cool\n- Serve\n• Enjoy\nplain step\n";
+  assert.deepEqual(parseRecipeDescription(text), {
+    ingredients: ["2 eggs", "1 cup flour", "pinch of salt", "no-break space"],
+    instructions: ["Mix", "Bake", "Cool", "Serve", "Enjoy", "plain step"],
+  });
+  assert.deepEqual(parseRecipeDescription("Ingredients:\n*  indented star\n"), { ingredients: ["indented star"], instructions: null });
+  assert.deepEqual(parseRecipeDescription("Ingredients:\n- \n* \n• \n"), { ingredients: [], instructions: null }, "empty bullets add nothing");
 });

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { TOOLSETS, EXPOSED_MEAL_APPLY_TO_VALUES, MEAL_SCOPE_TEXT, RECIPE_HEADINGS, ALL_PHOTOS_ALBUM_ID, ALL_PHOTOS, FRAME_USER_STATUS, RRULE_PREFIX, featureName, LIST_KINDS, DEFAULT_LIST_KIND, LIST_ITEM_STATUS, EVENT_KIND, OWN_EVENT_SOURCE, APPLY_TO_VALUES, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, PROFILE_KINDS, DEFAULT_PROFILE_KIND, ROUTINE_SLOTS, ROUTINE_SLOT_NAMES, slotFromHour, slotFromStartTime, isPersonKind, kindFromLinked, linkedFromKind } from "../../src/skylight/vocab.js";
+import { TOOLSETS, EXPOSED_MEAL_APPLY_TO_VALUES, MEAL_SCOPE_TEXT, RECIPE_HEADINGS, ALL_PHOTOS_ALBUM_ID, ALL_PHOTOS, FRAME_USER_STATUS, RRULE_PREFIX, OWN_PHOTO_SENDER, featureName, LIST_KINDS, DEFAULT_LIST_KIND, LIST_ITEM_STATUS, EVENT_KIND, OWN_EVENT_SOURCE, APPLY_TO_VALUES, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, PROFILE_KINDS, DEFAULT_PROFILE_KIND, ROUTINE_SLOTS, ROUTINE_SLOT_NAMES, slotFromHour, slotFromStartTime, isPersonKind, kindFromLinked, linkedFromKind } from "../../src/skylight/vocab.js";
 
 test("every exposed apply_to value is a known server value", () => {
   for (const v of [...EXPOSED_APPLY_TO_VALUES, ...EXPOSED_UPDATE_APPLY_TO_VALUES]) assert.ok(APPLY_TO_VALUES.includes(v), v);
@@ -118,6 +118,7 @@ test("meal, device and frame-user vocab matches the verified server values", () 
   assert.equal(ALL_PHOTOS, "all");
   assert.deepEqual({ ...FRAME_USER_STATUS }, { approved: "approved", blocked: "rejected", awaitingApproval: "awaiting_approval" });
   assert.equal(RRULE_PREFIX, "RRULE:");
+  assert.equal(OWN_PHOTO_SENDER, "you");
   assert.equal(featureName("meal_planning"), "meals");
   assert.equal(featureName("chores"), "chores");
 });

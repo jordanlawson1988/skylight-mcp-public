@@ -1,6 +1,6 @@
 import { ID_PATTERN, parseChoreId, parseEventId, type ChoreRef } from "./ids.js";
 import { hourFromRrule } from "./rrule.js";
-import { ALL_PHOTOS, ALL_PHOTOS_ALBUM_ID, LIST_ITEM_STATUS, LIST_KINDS, RECIPE_HEADINGS, featureName, kindFromLinked, slotFromHour, slotFromStartTime, type ListKind, type ProfileKind, type RoutineSlot } from "./vocab.js";
+import { ALL_PHOTOS, ALL_PHOTOS_ALBUM_ID, LIST_ITEM_STATUS, OWN_PHOTO_SENDER, LIST_KINDS, RECIPE_HEADINGS, featureName, kindFromLinked, slotFromHour, slotFromStartTime, type ListKind, type ProfileKind, type RoutineSlot } from "./vocab.js";
 
 export interface Profile { id: string; name: string; color: string | null; kind: ProfileKind | null; onChoreChart: boolean | null }
 export interface Chore {
@@ -262,8 +262,10 @@ export function mapMealCategories(json: unknown): MealCategory[] {
 
 const RECIPE_HEADING = /^[A-Za-z][A-Za-z ]*:$/;
 const NUMBERING = /^\d+[.)]\s*/;
+/** A list bullet the app or a person might use: "- a", "* a" or "• a" (the bullet must be followed by whitespace). */
+const BULLET = /^[-*•]\s+/;
 
-/** Split a recipe description written in the app's convention ("Ingredients:\n- a\n\nInstructions:\n1. x\n") into its two lists. */
+/** Split a recipe description in the app's layout ("Ingredients:\n- a\n\nInstructions:\n1. x\n") into its two lists. Bullets may be "- ", "* " or "• "; steps may be numbered "1." or "1)". */
 export function parseRecipeDescription(description: string | null): { ingredients: string[] | null; instructions: string[] | null } {
   let ingredients: string[] | null = null;
   let instructions: string[] | null = null;
@@ -279,9 +281,9 @@ export function parseRecipeDescription(description: string | null): { ingredient
       continue;
     }
     if (section === "ingredients" && ingredients !== null) {
-      if (line.startsWith("- ")) { const item = line.slice(2).trim(); if (item !== "") ingredients.push(item); }
+      if (BULLET.test(line)) { const item = line.replace(BULLET, "").trim(); if (item !== "") ingredients.push(item); }
     } else if (section === "instructions" && instructions !== null) {
-      const step = line.replace(NUMBERING, "").trim();
+      const step = line.replace(NUMBERING, "").replace(BULLET, "").trim();
       if (step !== "") instructions.push(step);
     }
   }
@@ -375,18 +377,31 @@ export function mapAlbums(json: unknown): Album[] {
   return dataArray(json).map(mapAlbum).filter((a): a is Album => a !== null);
 }
 
-/** A photo or video ("message"). The asset and thumbnail URLs, storage keys and owner ids are never read. */
-export function mapPhoto(resource: unknown): Photo | null {
+/**
+ * A photo or video ("message"). The asset and thumbnail URLs and storage keys are never read, and the frame owner's email is never returned: `from` is
+ * OWN_PHOTO_SENDER when `sender_id` is the frame owner's user id (the message's own `frame_owner_id`, else `fallbackOwnerId`), the sender's email for
+ * anyone else, and null when the owner or the sender cannot be identified (so an unrecognised owner's email can not leak).
+ */
+export function mapPhoto(resource: unknown, fallbackOwnerId: string | null = null): Photo | null {
   const r = rec(resource);
   const id = idOf(r.id);
   const a = rec(r.attributes);
   if (!id) return null;
-  return { id, type: str(a.asset_type), createdAt: str(a.created_at), caption: str(a.caption), from: str(a.from_email), commentsCount: num(a.comments_count) };
+  const owner = idOf(a.frame_owner_id) ?? fallbackOwnerId;
+  const sender = idOf(a.sender_id);
+  const email = str(a.from_email);
+  const from = owner === null || sender === null ? null : sender === owner ? OWN_PHOTO_SENDER : email;
+  return { id, type: str(a.asset_type), createdAt: str(a.created_at), caption: str(a.caption), from, commentsCount: num(a.comments_count) };
 }
 
-export function mapPhotoPage(json: unknown, requestedPage: number): PhotoPage {
+/** True when every message in the response names the frame owner (`frame_owner_id`), so no other lookup is needed to tell the owner's own photos. */
+export function photosCarryOwner(json: unknown): boolean {
+  return dataArray(json).every((m) => idOf(rec(m.attributes).frame_owner_id) !== null);
+}
+
+export function mapPhotoPage(json: unknown, requestedPage: number, fallbackOwnerId: string | null = null): PhotoPage {
   const meta = rec(rec(json).meta);
-  return { page: num(meta.current_page) ?? requestedPage, pages: num(meta.num_pages) ?? 1, photos: dataArray(json).map(mapPhoto).filter((p): p is Photo => p !== null) };
+  return { page: num(meta.current_page) ?? requestedPage, pages: num(meta.num_pages) ?? 1, photos: dataArray(json).map((m) => mapPhoto(m, fallbackOwnerId)).filter((p): p is Photo => p !== null) };
 }
 
 export function mapDevice(resource: unknown): Device | null {

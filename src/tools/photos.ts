@@ -3,7 +3,7 @@ import { z } from "zod";
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertNumericId } from "../skylight/ids.js";
 import { assertAlbumTitle, assertPhotoIds, buildAlbumMembershipBody, buildCaptionBody, buildDestroyPhotosBody, MAX_ALBUM_TITLE_LENGTH, MAX_CAPTION_LENGTH } from "../skylight/photo-payload.js";
-import { mapAlbum, mapAlbums, mapPhoto, mapPhotoPage, type Album, type Photo } from "../skylight/types.js";
+import { mapAlbum, mapAlbums, mapFrameUsers, mapPhoto, mapPhotoPage, photosCarryOwner, type Album, type Photo } from "../skylight/types.js";
 import { formatOffsetDateTime } from "../skylight/time.js";
 import type { ToolContext } from "./context.js";
 import { ANNOTATIONS, run } from "./result.js";
@@ -59,7 +59,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
     "skylight_list_photos",
     {
       title: "List photos",
-      description: "List the photos and videos on the frame, newest first, one page at a time, as { page, pages, photos: [{ id, type, createdAt, caption, from, commentsCount }] }. type is photo or video; createdAt is in the configured time zone; from is who sent it. Photo ids are needed for captions, albums and deletion. Photo files and links are never returned.",
+      description: "List the photos and videos on the frame, newest first, one page at a time, as { page, pages, photos: [{ id, type, createdAt, caption, from, commentsCount }] }. type is photo or video; createdAt is in the configured time zone; from is \"you\" for photos the frame owner sent and the sender's email for anyone else. Photo ids are needed for captions, albums and deletion. Photo files and links are never returned.",
       inputSchema: { page: z.number().int().min(1).optional().describe("Page number, starting at 1 (default 1). pages in the result is the total.") },
       annotations: ANNOTATIONS.read,
     },
@@ -67,7 +67,14 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const page = args.page ?? 1;
       if (!Number.isInteger(page) || page < 1) throw new ValidationError("page", "must be a whole number from 1");
       const frameId = await ctx.frames.resolve();
-      const result = mapPhotoPage(await ctx.client.request({ method: "GET", path: messagesPath(frameId), query: { page } }), page);
+      const json = await ctx.client.request({ method: "GET", path: messagesPath(frameId), query: { page } });
+      // Messages normally name the frame owner; if one does not, find the owner among the frame's users so their own photos show "you", not their email.
+      let ownerId: string | null = null;
+      if (!photosCarryOwner(json)) {
+        try { ownerId = mapFrameUsers(await ctx.client.request({ method: "GET", path: `/api/frames/${frameId}/users` })).find((u) => u.owner)?.userId ?? null; }
+        catch (e) { if (!(e instanceof SkylightApiError)) throw e; }
+      }
+      const result = mapPhotoPage(json, page, ownerId);
       return { ...result, photos: result.photos.map((p) => present(p, tz)) };
     })
   );
@@ -87,7 +94,12 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const id = assertNumericId(args.photoId, "photoId");
       const body = buildCaptionBody(args.caption);
       const frameId = await ctx.frames.resolve();
-      await ctx.client.request({ method: "PUT", path: `${messagesPath(frameId)}/${id}/caption`, body });
+      try {
+        await ctx.client.request({ method: "PUT", path: `${messagesPath(frameId)}/${id}/caption`, body });
+      } catch (e) {
+        if (e instanceof SkylightApiError && e.status === 404) throw new ValidationError("photoId", "no photo with that id on this frame");
+        throw e;
+      }
       return { id, caption: body.caption, updated: true };
     })
   );
@@ -194,7 +206,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
     "skylight_add_photos_to_album",
     {
       title: "Add photos to an album",
-      description: `Add up to ${MAX_ALBUM_PHOTOS} photos or videos to an album. The photos stay on the frame and in any other album. Adding one that is already in the album changes nothing.`,
+      description: `Add up to ${MAX_ALBUM_PHOTOS} photos or videos to an album. The photos stay on the frame and in any other album. Adding one that is already in the album changes nothing. Built-in albums (editable: false) are refused.`,
       inputSchema: { albumId: albumIdSchema, photoIds: z.array(z.string()).min(1).max(MAX_ALBUM_PHOTOS).describe("Photo ids from skylight_list_photos.") },
       annotations: ANNOTATIONS.update,
     },
@@ -202,6 +214,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const photoIds = assertPhotoIds(args.photoIds, "photoIds", MAX_ALBUM_PHOTOS);
       const body = buildAlbumMembershipBody(args.albumId, photoIds);
       const frameId = await ctx.frames.resolve();
+      await getEditableAlbum(ctx, frameId, String(body.album_ids[0]));
       await ctx.client.request({ method: "POST", path: `${albumsPath(frameId)}/add_to`, body });
       return { added: photoIds.length, albumId: String(body.album_ids[0]), photoIds };
     })
@@ -211,7 +224,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
     "skylight_remove_photos_from_album",
     {
       title: "Remove photos from an album",
-      description: `Take up to ${MAX_ALBUM_PHOTOS} photos or videos out of an album. They stay on the frame; only their place in this album goes.`,
+      description: `Take up to ${MAX_ALBUM_PHOTOS} photos or videos out of an album. They stay on the frame; only their place in this album goes. Built-in albums (editable: false) are refused.`,
       inputSchema: { albumId: albumIdSchema, photoIds: z.array(z.string()).min(1).max(MAX_ALBUM_PHOTOS).describe("Photo ids from skylight_list_photos.") },
       annotations: ANNOTATIONS.update,
     },
@@ -219,6 +232,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext): void {
       const photoIds = assertPhotoIds(args.photoIds, "photoIds", MAX_ALBUM_PHOTOS);
       const body = buildAlbumMembershipBody(args.albumId, photoIds);
       const frameId = await ctx.frames.resolve();
+      await getEditableAlbum(ctx, frameId, String(body.album_ids[0]));
       await ctx.client.request({ method: "POST", path: `${albumsPath(frameId)}/remove_from`, body });
       return { removed: photoIds.length, albumId: String(body.album_ids[0]), photoIds };
     })

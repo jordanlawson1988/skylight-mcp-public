@@ -45,6 +45,17 @@ test("update device: albumId \"all\" sends -1 without a lookup; an album id is c
   await t.close();
 });
 
+test("update device compares the album id as a number, so a differently spelled id from the albums list still matches", async () => {
+  const albumsList = { data: [{ id: 3001, type: "album_with_messages", attributes: { title: "Numeric" } }, { id: "03002", type: "album_with_messages", attributes: { title: "Padded" } }] };
+  const t = await connectTestClient([FRAMES, { method: "PUT", path: `${F}/devices/88`, json: { data: device } }, { method: "GET", path: `${F}/albums`, json: albumsList }]);
+  assert.equal((await t.callTool("skylight_update_device", { deviceId: "88", albumId: "3001" })).isError, false);
+  assert.equal((await t.callTool("skylight_update_device", { deviceId: "88", albumId: "3002" })).isError, false);
+  assert.deepEqual(writes(t).map((c) => c.body), [{ current_album_id: 3001 }, { current_album_id: 3002 }]);
+  assert.equal((await t.callTool("skylight_update_device", { deviceId: "88", albumId: "3003" })).isError, true);
+  assert.equal(writes(t).length, 2);
+  await t.close();
+});
+
 test("update device validates before any request: empty, ranges, times, ids", async () => {
   const t = await connectTestClient([FRAMES, { method: "PUT", path: /devices/, json: { data: device } }]);
   const cases: Array<Record<string, unknown>> = [
