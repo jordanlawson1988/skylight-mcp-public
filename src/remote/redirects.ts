@@ -19,6 +19,16 @@ const LOOPBACK_REDIRECT = /^http:\/\/(?:localhost|127\.0\.0\.1):([0-9]{1,5})\/ca
 /** Hosts whose Client ID Metadata Documents are trusted (exact hostnames, https, default port). */
 export const CIMD_CLIENT_HOSTS = ["claude.ai", "claude.com", "chatgpt.com", "openai.com"] as const;
 
+/** What the consent page calls each app: decided by where access is sent, never by the name the client gives itself. */
+export const APP_NAMES = { claude: "Claude", chatgpt: "ChatGPT", claudeCode: "Claude Code on this computer" } as const;
+
+export function appNameForRedirect(uri: string): string {
+  if (!isAllowedRedirectUri(uri)) return "an unknown app";
+  if (LOOPBACK_REDIRECT.test(uri)) return APP_NAMES.claudeCode;
+  const host = new URL(uri).hostname;
+  return host === "chatgpt.com" ? APP_NAMES.chatgpt : APP_NAMES.claude;
+}
+
 export function isAllowedRedirectUri(uri: unknown): boolean {
   if (typeof uri !== "string") return false;
   if ((ALLOWED_REDIRECT_URIS as readonly string[]).includes(uri)) return true;

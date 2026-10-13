@@ -2,7 +2,7 @@ import { base64ToBytes, bytesToBase64Url, randomBytes } from "../skylight/encodi
 import { pkceChallenge } from "../skylight/oauth.js";
 import { MCP_SCOPE, type RemoteEnv } from "./env.js";
 import { bindIdentity, isPlainEmail, type IdentityKv } from "./identity.js";
-import { isAllowedCimdClientId, isAllowedRedirectUri, isCimdClientId } from "./redirects.js";
+import { appNameForRedirect, isAllowedCimdClientId, isAllowedRedirectUri, isCimdClientId } from "./redirects.js";
 
 /**
  * Family sign-in: the MCP client (Claude, ChatGPT) sends the user to /authorize; they approve this app, sign in with
@@ -177,24 +177,31 @@ export function messagePage(status: number, title: string, message: string, extr
   return new Response(shell(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>`), { status, headers });
 }
 
+export const CONSENT_WARNING = "Only continue if you just started connecting from Claude or ChatGPT.";
+
+/**
+ * The consent page. The app is named from where access will be sent (appNameForRedirect), not from the name the client
+ * registered, which anyone can choose; that name appears only in small print, marked unverified.
+ */
 export function consentPage(o: { clientName: string; clientId: string; redirectUri: string; handle: string }): string {
-  const name = escapeHtml(o.clientName);
+  const app = appNameForRedirect(o.redirectUri);
+  const appHtml = escapeHtml(app);
   let redirectHost = "";
   try { redirectHost = new URL(o.redirectUri).hostname; } catch { redirectHost = o.redirectUri; }
-  const local = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/.test(redirectHost);
-  let origin: string;
-  if (o.clientId.startsWith("https://")) {
+  let source: string;
+  if (isCimdClientId(o.clientId)) {
     let host = o.clientId;
     try { host = new URL(o.clientId).hostname; } catch { /* keep the raw id */ }
-    origin = `Published by <strong>${escapeHtml(host)}</strong>.`;
+    source = `Its description is published by ${escapeHtml(host)}.`;
   } else {
-    origin = "This app registered itself; its name is not verified.";
+    source = "It registered itself with this server.";
   }
-  return shell(`Allow ${o.clientName}?`, `
-<h1>Allow ${name} to use the family Skylight?</h1>
-<p>This connects to the Lawson family Skylight. ${name} will be able to read and change the family calendar, chores, lists, meals, photos and frame settings, as you.</p>
-<p>${origin} Access will be sent to <strong>${escapeHtml(redirectHost)}</strong>.</p>
-${local ? "<p><strong>This sends access to an app on your computer.</strong> Continue only if you just started connecting from it.</p>" : ""}
+  return shell(`Allow ${app}?`, `
+<h1>Allow ${appHtml} to use the family Skylight?</h1>
+<p>This connects to the Lawson family Skylight. ${appHtml} will be able to read and change the family calendar, chores, lists, meals, photos and frame settings, as you.</p>
+<p><strong>${escapeHtml(CONSENT_WARNING)}</strong> If this page opened by itself or from a link someone sent you, press Cancel.</p>
+<p>Access will be sent to <strong>${escapeHtml(redirectHost)}</strong>.</p>
+<p class="muted">The app calls itself &quot;${escapeHtml(o.clientName)}&quot; (not verified). ${source}</p>
 <p class="muted">Next you will choose a Google account. Only accounts on the family list can connect.</p>
 <form method="post" action="/authorize">
 <input type="hidden" name="handle" value="${escapeHtml(o.handle)}">

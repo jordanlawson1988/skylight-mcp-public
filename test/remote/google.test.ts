@@ -88,11 +88,11 @@ test("the consent page shows the app, where access goes and the family Skylight,
   assert.ok(html.includes("This connects to the Lawson family Skylight"));
   assert.ok(html.includes(`value="h&quot;&gt;&lt;b&gt;"`));
   assert.match(html, /name="decision" value="approve"/);
-  assert.match(html, /registered itself; its name is not verified/);
+  assert.match(html, /\(not verified\)\. It registered itself with this server\./);
   const cimd = consentPage({ clientName: "ChatGPT", clientId: "https://chatgpt.com/oauth/client.json", redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect", handle: "h" });
-  assert.match(cimd, /Published by <strong>chatgpt\.com<\/strong>/);
+  assert.match(cimd, /Its description is published by chatgpt\.com\./);
   const local = consentPage({ clientName: "CLI", clientId: "abc", redirectUri: "http://localhost:3334/callback", handle: "h" });
-  assert.match(local, /an app on your computer/);
+  assert.match(local, /Allow Claude Code on this computer to use the family Skylight/);
 });
 
 // ---- token exchange ----
