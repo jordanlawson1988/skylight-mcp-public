@@ -190,3 +190,10 @@ Verified live on 2026-10-12.
 - The token response includes `expires_in` (24 hours).
 - The Keychain write via `/usr/bin/security` worked.
 - The callback page `https://ourskylight.com/welcome?code=...` immediately JS-redirects to `https://ourskylight.com/`, so a person cannot copy the callback URL from the address bar. Chrome's History database (`~/Library/Application Support/Google/Chrome/<Profile>/History`, table `urls(url, last_visit_time)`, microseconds since 1601-01-01) does retain the `welcome?code=` URL. `skylight-mcp login` therefore reads it from a temporary copy of that database (the file is locked while Chrome runs) using `/usr/bin/sqlite3`. `skylight-mcp login --complete <url>` remains as the manual path.
+
+## Refresh-token rotation [live 2026-10-12]
+
+- Skylight rotates the refresh token on every refresh: a forced `grant_type=refresh_token` call returned a new `refresh_token` (a different fingerprint from the one sent), so the old one is spent. Two holders of one grant would break each other, because whichever refreshes first leaves the other with a dead token.
+- The shared server (`src/remote/`) therefore never copies the Mac's credential. `skylight-mcp remote login` runs a separate Skylight sign-in and sends that grant to the server, which keeps it encrypted in its Durable Object, refreshes it one at a time (concurrent callers share the in-flight refresh), and stores each rotated refresh token. A refresh response without `refresh_token` keeps the previous one, as on the Mac.
+- A refresh answered 400 or 401 means the grant is gone. The Mac tells you to run `skylight-mcp login`; the shared server marks itself `needsLogin` (nothing is deleted) and answers "Skylight sign-in for the shared server expired; Jordan needs to run `skylight-mcp remote login`." until a new grant arrives.
+- Each refresh sends the device fingerprint the grant was issued with (`skylight_api_client_device_fingerprint`); `remote login` passes it to the server along with the tokens.

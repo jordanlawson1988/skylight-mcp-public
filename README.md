@@ -2,7 +2,7 @@
 
 ## What it is
 
-skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists, calendar events, the meal plan and recipes, photos and albums, devices, frame settings and sharing on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API.
+skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists, calendar events, the meal plan and recipes, photos and albums, devices, frame settings and sharing on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API. The same tools can also run as a shared server on Cloudflare Workers for Claude and ChatGPT on any device (see "Use from Claude and ChatGPT on any device").
 
 This is an unofficial project. It is not affiliated with or endorsed by Skylight. It uses Skylight's private API, which is undocumented and can change or break at any time without notice. It runs on macOS only, because the login credential is stored with the macOS Keychain.
 
@@ -20,6 +20,7 @@ This is an unofficial project. It is not affiliated with or endorsed by Skylight
 - Deleting a profile works the same way: `skylight_delete_profile` needs `confirm: true`, and its preview shows the upcoming chore count and where chores and events would go. To retire a person without losing their events, use `skylight_update_profile` with `kind: "label"` (Skylight's "Convert to Label").
 - Bulk create validates every item before sending any request, supports `dryRun: true`, and stops early if Skylight rejects the login or rate limits the requests.
 - Tokens are stored encrypted with AES-256-GCM. The encryption key lives in the macOS Keychain. Any process running as your user can read that key through `/usr/bin/security` without a prompt, so the encryption protects backups and the file at rest, not against malware on the Mac.
+- On the shared server (Claude and ChatGPT over the internet), every call of a tool that can change something is logged with the family member who made it (ids only, 90 days); see "Use from Claude and ChatGPT on any device".
 - Tokens, codes and keys are never written to logs and never returned in tool results. `status` and `doctor` print no token values.
 - The OAuth token Skylight issues has full-account scope. The tool layer here is narrow, but the token itself is not. Treat the stored credential as sensitive, and run `skylight-mcp logout` to remove it.
 
@@ -73,6 +74,47 @@ skylight-mcp doctor
 ```
 
 If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` block of that entry. `doctor` includes it when it is set in your environment, and does the same for `SKYLIGHT_TIMEZONE` and `SKYLIGHT_TOOLSETS`.
+
+## Use from Claude and ChatGPT on any device
+
+The same tools can also run as a shared server, so the family can use them from Claude (web, Desktop, iPhone) and ChatGPT Business, each signed in as themselves, on the family's one Skylight frame. It is a Cloudflare Worker (free tier): Claude and ChatGPT connect to it over OAuth, family members sign in with Google, and only the emails on the family list get in. The server holds its own Skylight sign-in (Skylight rotates refresh tokens, so it never shares the Mac's), encrypted in a Durable Object, and logs every change with the family member who made it. The Mac setup above keeps working unchanged.
+
+Run these from your clone of this repository (the commands use its `wrangler.jsonc`). Do staging first, try it, then repeat with `--env production` and `npm run remote:deploy:production`.
+
+1. Sign in to Cloudflare: `npx wrangler login`.
+2. Deploy once to get the address: `npm run remote:deploy:staging`. It prints `https://skylight-mcp-staging.<your-subdomain>.workers.dev` (production: `https://skylight-mcp.<your-subdomain>.workers.dev`). The KV namespace is created on this first deploy.
+3. Create the server's two internal secrets: `skylight-mcp remote setup --env staging --url https://skylight-mcp-staging.<your-subdomain>.workers.dev`. It saves the address in `~/Library/Application Support/skylight-mcp/remote.json`, generates `SKYLIGHT_TOKEN_KEY` (encrypts the stored Skylight sign-in) and `ADMIN_TOKEN` (for the commands below), uploads both with `wrangler secret put` and keeps the admin token in your Keychain. Neither is printed or written to a file. Running setup again replaces both, after which you run `remote login` again.
+4. Create a Google sign-in client: Google Cloud console > APIs & Services > Credentials > Create credentials > OAuth client ID > Web application. Authorized redirect URIs: `https://skylight-mcp-staging.<your-subdomain>.workers.dev/callback` and `https://skylight-mcp.<your-subdomain>.workers.dev/callback`. If the OAuth consent screen is in Testing, add both family emails as test users.
+5. Give the Worker the Google client and the family list (each command asks for the value; the CLI never sees the Google secret):
+
+   ```sh
+   npx wrangler secret put GOOGLE_CLIENT_ID --env staging
+   npx wrangler secret put GOOGLE_CLIENT_SECRET --env staging
+   npx wrangler secret put ALLOWED_EMAILS --env staging   # comma-separated, e.g. you@gmail.com,spouse@example.com
+   ```
+
+6. Sign the server in to Skylight: `skylight-mcp remote login --env staging`. It is the same Chrome sign-in as `skylight-mcp login`, but the result goes to the server, not to this Mac's store. `skylight-mcp remote status --env staging` shows the server's sign-in.
+7. Claude (web, Desktop and iPhone share connectors): Customize > Connectors > Add custom connector, URL `https://skylight-mcp-staging.<your-subdomain>.workers.dev/mcp`. Leave the OAuth client fields empty; Claude registers itself. Connect, approve the consent page, then choose your Google account. Claude Free allows one custom connector.
+8. ChatGPT Business: the workspace owner turns on Developer mode for apps in the workspace settings; then, in ChatGPT, Settings > Apps, add a custom MCP server with the same `/mcp` URL and OAuth authentication. If the workspace belongs to an employer, its policy or admin may not allow a personal connector.
+
+What the sign-in shows: a consent page naming the app (Claude or ChatGPT), where access will be sent, and "This connects to the Lawson family Skylight", then Google's account chooser. A Google account that is not on `ALLOWED_EMAILS` gets "This Google account is not on the family list." and no access. The list is checked again on every call, so removing an email takes effect immediately. An app's connection lasts up to 30 days, then it asks you to connect again.
+
+What is logged:
+
+- The activity log: every call of a tool that can change something records when, who (the Google email), which tool, the ids it touched, and whether it worked or was only a preview. No other argument values, no tokens. It keeps 90 days. Ask for it with `skylight_recent_activity`.
+- Cloudflare's logs: one line per request with method, path, status and duration. Request headers, bodies and query strings are not logged.
+
+To take access away:
+
+- One person: `skylight-mcp remote revoke <email> --env production` disconnects every app they connected; remove them from `ALLOWED_EMAILS` (`npx wrangler secret put ALLOWED_EMAILS --env production`) to keep them out.
+- The server's Skylight access: `skylight-mcp remote logout --env production` (asks first). Tools then answer that Jordan needs to run `skylight-mcp remote login`.
+
+Limits and notes:
+
+- The same confirm gates, previews and tool annotations apply, and Claude and ChatGPT add their own approval prompts for tools that change things. ChatGPT sometimes blocks write calls with its own safety checks, and whether ChatGPT's phone app can use custom connectors is up to OpenAI.
+- 300 calls per person every 10 minutes; past that the server answers 429.
+- `SKYLIGHT_TOOLSETS` (a Worker var in `wrangler.jsonc`) trims the tool list per environment if a client struggles with many tools.
+- The `workers.dev` address is public. Security rests on OAuth with a consent page per app, the Google allowlist and the admin token. Anyone with access to the Cloudflare account can read the Worker's secrets.
 
 ## Toolsets
 
@@ -164,6 +206,7 @@ By default the server registers every tool (more than sixty), which some assista
 | `skylight_unblock_frame_user` | Gives a blocked person access again, or approves one who is waiting. |
 | `skylight_get_account` | The plan, subscriptions (`{ status, cadence, type }`) and marketing-email flag. No email, phone, birthday or name. |
 | `skylight_set_marketing_emails` | Turns Skylight's marketing emails on or off. |
+| `skylight_recent_activity` | Shared server only: the latest changes made through it (when, who, tool, ids, ok or preview), newest first; `limit` 1 to 50, default 20. |
 
 ## Example prompts
 
@@ -202,7 +245,8 @@ Skylight stores and returns UTC. skylight-mcp shows you everything in one zone, 
 Use `skylight-mcp ...` as above, or `node dist/cli.js ...` without linking.
 
 ```sh
-npm run check        # typecheck, tests and build
+npm run check        # typecheck (Mac, tests, Worker), tests, build, and the Worker's dry-run bundle
+npm run remote:dev   # the shared server locally (wrangler dev; put dummy secrets in .dev.vars)
 npm run live:smoke   # opt-in checks against the real API
 ```
 
