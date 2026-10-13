@@ -3,6 +3,7 @@ import { excerpt } from "../skylight/redact.js";
 import type { AccountRpc } from "./account-core.js";
 import { SkylightAccount } from "./account-do.js";
 import { handleAdmin } from "./admin.js";
+import { edgeGuard, type RateLimitBinding } from "./edge-guard.js";
 import { ACCOUNT_OBJECT_NAME, secretValues, type RemoteEnv } from "./env.js";
 import { handleAuthorize, handleCallback, type OAuthApi } from "./google.js";
 import { createMcpHandler } from "./mcp-handler.js";
@@ -16,7 +17,7 @@ export { SkylightAccount };
  * (the Google sign-in pages, /admin, /health) is the defaultHandler below.
  */
 
-interface Env extends RemoteEnv {
+interface Env extends RemoteEnv, Record<RateLimitBinding, RateLimit> {
   OAUTH_KV: KVNamespace;
   SKYLIGHT_ACCOUNT: DurableObjectNamespace<SkylightAccount>;
   /** Set by the provider before it calls a handler. */
@@ -74,6 +75,12 @@ export default {
     const url = new URL(request.url);
     let status = 500;
     try {
+      // https only, and per-IP limits on /register, /authorize, /callback and /token, before the provider runs.
+      const refused = await edgeGuard(request, env);
+      if (refused) {
+        status = refused.status;
+        return refused;
+      }
       // A shallow copy per request: the provider attaches OAUTH_PROVIDER to the env it is given.
       const response = await providerFor(url.origin).fetch(request, { ...env } as Env, ctx);
       status = response.status;

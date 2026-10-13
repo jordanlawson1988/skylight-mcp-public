@@ -112,7 +112,9 @@ To take access away:
 Limits and notes:
 
 - The same confirm gates, previews and tool annotations apply, and Claude and ChatGPT add their own approval prompts for tools that change things. ChatGPT sometimes blocks write calls with its own safety checks, and whether ChatGPT's phone app can use custom connectors is up to OpenAI.
-- 300 calls per person every 10 minutes; past that the server answers 429.
+- 300 calls per person every 10 minutes; past that the server answers 429. The sign-in endpoints are also limited per IP address per minute: `/register` 5, `/authorize` and `/callback` 20 each, `/token` 60.
+- Only Claude and ChatGPT can connect: app registration accepts only their redirect addresses (`claude.ai` and `claude.com` `/api/mcp/auth_callback`, ChatGPT's connector callbacks, and `http://localhost:<port>/callback` for Claude Code), and metadata-document clients must come from claude.ai, claude.com, chatgpt.com or openai.com. Anything else gets "This app cannot connect to the family Skylight."
+- Cloudflare's free plan allows about 1,000 KV writes a day. Sign-ins, token refreshes and app registrations write to KV, so a busy day could hit that ceiling; Workers Paid ($5 a month) removes it and is the better choice for production.
 - `SKYLIGHT_TOOLSETS` (a Worker var in `wrangler.jsonc`) trims the tool list per environment if a client struggles with many tools.
 - The `workers.dev` address is public. Security rests on OAuth with a consent page per app, the Google allowlist and the admin token. Anyone with access to the Cloudflare account can read the Worker's secrets.
 

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { IP_RATE_LIMITS, RATE_LIMIT_PERIOD_SECONDS } from "../../src/remote/edge-guard.js";
 import { ACCOUNT_OBJECT_NAME, REMOTE_SECRETS } from "../../src/remote/env.js";
 
 /** Strips // and /* *\/ comments outside strings, then parses (wrangler.jsonc has no trailing commas). */
@@ -28,6 +29,7 @@ interface EnvConfig {
   durable_objects: { bindings: Array<{ name: string; class_name: string }> };
   migrations: Array<{ tag: string; new_sqlite_classes: string[] }>;
   kv_namespaces: Array<{ binding: string; id?: string }>;
+  ratelimits: Array<{ name: string; namespace_id: string; simple: { limit: number; period: number } }>;
   vars: Record<string, string>;
   secrets: { required: string[] };
   workers_dev: boolean;
@@ -42,7 +44,9 @@ const config = parseJsonc(raw) as EnvConfig & {
 };
 
 test("wrangler.jsonc: one Worker entry, the compat flags CIMD needs, two environments with their own names", () => {
-  assert.equal(config.name, "skylight-mcp");
+  // The top level is a local default only: deploys always name --env staging or --env production.
+  assert.equal(config.name, "skylight-mcp-dev");
+  assert.equal(config.workers_dev, false);
   assert.equal(config.main, "src/remote/worker.ts");
   assert.equal(config.compatibility_date, "2026-09-27");
   assert.deepEqual([...config.compatibility_flags].sort(), ["global_fetch_strictly_public", "nodejs_compat"]);
@@ -56,10 +60,29 @@ test("every environment repeats the Durable Object, its SQLite migration, the KV
     assert.deepEqual(env.migrations, [{ tag: "v1", new_sqlite_classes: ["SkylightAccount"] }], label);
     assert.deepEqual(env.kv_namespaces, [{ binding: "OAUTH_KV" }], label);
     assert.deepEqual(env.vars, { SKYLIGHT_TIMEZONE: "America/New_York" }, label);
-    assert.equal(env.workers_dev, true, label);
     assert.equal(env.preview_urls, false, label);
   }
   assert.equal(ACCOUNT_OBJECT_NAME, "family");
+  assert.equal(config.env.staging.workers_dev, true);
+  assert.equal(config.env.production.workers_dev, true);
+});
+
+test("every environment has the four per-IP rate limiters with IP_RATE_LIMITS' numbers and its own namespace ids", () => {
+  const expected = Object.values(IP_RATE_LIMITS).map((r) => ({ name: r.binding, limit: r.limit, period: RATE_LIMIT_PERIOD_SECONDS })).sort((a, b) => a.name.localeCompare(b.name));
+  const ids: string[] = [];
+  for (const [label, env] of [["top", config], ["staging", config.env.staging], ["production", config.env.production]] as const) {
+    const got = env.ratelimits.map((r) => ({ name: r.name, limit: r.simple.limit, period: r.simple.period })).sort((a, b) => a.name.localeCompare(b.name));
+    assert.deepEqual(got, expected, label);
+    for (const r of env.ratelimits) { assert.match(r.namespace_id, /^[1-9][0-9]*$/, label); ids.push(r.namespace_id); }
+  }
+  assert.equal(new Set(ids).size, ids.length, "namespace ids are unique across environments");
+});
+
+test("the npm scripts only deploy or run a named environment", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { scripts: Record<string, string> };
+  for (const [name, cmd] of Object.entries(pkg.scripts).filter(([, c]) => /\bwrangler\b/.test(c))) {
+    assert.match(cmd, /--env (staging|production)\b/, name);
+  }
 });
 
 test("the required secrets match REMOTE_SECRETS everywhere, and no secret is a plain var", () => {
