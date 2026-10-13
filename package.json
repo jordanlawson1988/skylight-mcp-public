@@ -20,10 +20,14 @@
     "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/cli.js dist/server.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.worker.json",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run typecheck && npm test && npm run build && npm run remote:build",
     "live:smoke": "tsx scripts/live-smoke.ts",
     "dev:server": "tsx src/server.ts",
-    "dev:cli": "tsx src/cli.ts"
+    "dev:cli": "tsx src/cli.ts",
+    "remote:dev": "wrangler dev --env staging",
+    "remote:build": "wrangler deploy --dry-run --outdir dist-worker --env staging",
+    "remote:deploy:staging": "wrangler deploy --env staging",
+    "remote:deploy:production": "wrangler deploy --env production"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.1.0",

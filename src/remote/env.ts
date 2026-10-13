@@ -20,6 +20,9 @@ export interface RemoteEnv {
   SKYLIGHT_TOOLSETS?: string;
 }
 
+/** The SkylightAccount Durable Object's one instance: the whole family shares a single Skylight account. */
+export const ACCOUNT_OBJECT_NAME = "family";
+
 /** The one OAuth scope the server grants (advertised, approved on the consent page, required by nothing finer). */
 export const MCP_SCOPE = "skylight";
 

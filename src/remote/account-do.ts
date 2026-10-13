@@ -5,11 +5,8 @@ import {
 } from "./account-core.js";
 import { configFromEnv, type RemoteEnv } from "./env.js";
 
-/** The one instance's name: the whole family shares a single Skylight account. */
-export const ACCOUNT_OBJECT_NAME = "family";
-
 /**
- * The family's Skylight account on the shared server: one Durable Object instance (idFromName("family")) with SQLite
+ * The family's Skylight account on the shared server: one Durable Object instance (idFromName(ACCOUNT_OBJECT_NAME) in env.ts) with SQLite
  * storage. Its single-threaded execution plus AccountCore's shared in-flight refresh means two family members calling
  * tools at once never refresh the rotating Skylight token twice.
  */

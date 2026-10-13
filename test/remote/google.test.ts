@@ -132,6 +132,10 @@ test("GET /authorize renders the consent page with the library's binding and ant
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-type") ?? "", /text\/html/);
   assert.equal(page.headers.get("x-frame-options"), "DENY");
+  const csp = page.headers.get("content-security-policy") ?? "";
+  assert.match(csp, /frame-ancestors 'none'/);
+  // form-action would also govern the redirect to Google after Allow (and back to the app after Cancel).
+  assert.doesNotMatch(csp, /form-action/);
   assert.match(page.headers.get("set-cookie") ?? "", /__Host-oauth-consent/);
   const html = await page.text();
   assert.match(html, /Claude/);
