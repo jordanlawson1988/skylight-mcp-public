@@ -2,7 +2,7 @@ import { EXPIRY_SKEW_MS } from "../skylight/auth.js";
 import type { SkylightConfig } from "../skylight/config.js";
 import { base64ToBytes, bytesToBase64, randomBytes, utf8 } from "../skylight/encoding.js";
 import { AuthError } from "../skylight/errors.js";
-import { refreshCredential, type OAuthCredential } from "../skylight/oauth.js";
+import { REFRESH_TIMEOUT_MS, refreshCredential, type OAuthCredential } from "../skylight/oauth.js";
 import { auditError, auditTargets } from "../tools/audit.js";
 import type { AuditEntry } from "../tools/context.js";
 
@@ -26,6 +26,8 @@ export interface AccountCoreOpts {
   fetch: typeof globalThis.fetch;
   config: SkylightConfig;
   now: () => number;
+  /** Token refresh timeout; REFRESH_TIMEOUT_MS (30 s) unless a test shortens it. Not config.requestTimeoutMs. */
+  refreshTimeoutMs?: number;
 }
 
 /** An audit entry as stored: when (UTC ISO) and who (the signed-in email) added by the Worker. */
@@ -173,7 +175,7 @@ export class AccountCore {
       try {
         fresh = await refreshCredential({
           fetch: this.opts.fetch, apiBaseUrl: this.opts.config.apiBaseUrl, credential: current,
-          timeoutMs: this.opts.config.requestTimeoutMs, loginCommand: REMOTE_LOGIN_COMMAND,
+          timeoutMs: this.opts.refreshTimeoutMs ?? REFRESH_TIMEOUT_MS, loginCommand: REMOTE_LOGIN_COMMAND,
         });
       } catch (e) {
         if (e instanceof AuthError && e.code === "session_expired") {

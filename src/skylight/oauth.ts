@@ -8,6 +8,11 @@ export const SCOPE = "everything";
 export const PENDING_LOGIN_TTL_MS = 600_000;
 /** The command that signs this machine in again; the shared server passes `skylight-mcp remote login`. */
 export const DEFAULT_LOGIN_COMMAND = "skylight-mcp login";
+/**
+ * How long a token refresh may take, separate from SKYLIGHT_REQUEST_TIMEOUT_MS: Skylight rotates the refresh token, so
+ * abandoning a refresh it already answered would lose the new token and with it the sign-in. Generous on purpose.
+ */
+export const REFRESH_TIMEOUT_MS = 30_000;
 
 export type PkceMethod = "S256" | "plain";
 
