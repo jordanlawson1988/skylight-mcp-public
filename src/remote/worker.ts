@@ -3,9 +3,10 @@ import { excerpt } from "../skylight/redact.js";
 import type { AccountRpc } from "./account-core.js";
 import { SkylightAccount } from "./account-do.js";
 import { handleAdmin } from "./admin.js";
-import { ACCOUNT_OBJECT_NAME, MCP_SCOPE, secretValues, type RemoteEnv } from "./env.js";
+import { ACCOUNT_OBJECT_NAME, secretValues, type RemoteEnv } from "./env.js";
 import { handleAuthorize, handleCallback, type OAuthApi } from "./google.js";
 import { createMcpHandler } from "./mcp-handler.js";
+import { providerPolicy } from "./provider-options.js";
 
 export { SkylightAccount };
 
@@ -61,23 +62,7 @@ const providers = new Map<string, OAuthProvider<Env>>();
 function providerFor(origin: string): OAuthProvider<Env> {
   let provider = providers.get(origin);
   if (!provider) {
-    provider = new OAuthProvider<Env>({
-      apiRoute: "/mcp",
-      apiHandler,
-      defaultHandler,
-      authorizeEndpoint: "/authorize",
-      tokenEndpoint: "/token",
-      clientRegistrationEndpoint: "/register",
-      scopesSupported: [MCP_SCOPE],
-      accessTokenTTL: 3600,
-      clientIdMetadataDocumentEnabled: true,
-      resourceMetadata: {
-        resource: `${origin}/mcp`,
-        scopes_supported: [MCP_SCOPE],
-        resource_name: "Lawson family Skylight",
-      },
-      onError: ({ status, code }) => { console.warn(JSON.stringify({ oauthError: code, status })); },
-    });
+    provider = new OAuthProvider<Env>({ apiRoute: "/mcp", apiHandler, defaultHandler, ...providerPolicy(origin) });
     providers.set(origin, provider);
   }
   return provider;

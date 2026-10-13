@@ -1,6 +1,7 @@
 import { base64ToBytes, bytesToBase64Url, randomBytes } from "../skylight/encoding.js";
 import { pkceChallenge } from "../skylight/oauth.js";
 import { MCP_SCOPE, type RemoteEnv } from "./env.js";
+import { isAllowedCimdClientId, isAllowedRedirectUri, isCimdClientId } from "./redirects.js";
 
 /**
  * Family sign-in: the MCP client (Claude, ChatGPT) sends the user to /authorize; they approve this app, sign in with
@@ -247,9 +248,26 @@ function authorizeError(e: unknown): Response {
 }
 
 /** GET /authorize shows the consent page; POST /authorize (the page's form) approves or declines it. */
+/** The refusal for an app that is not Claude or ChatGPT: plain text, no detail about why. */
+export const NOT_ALLOWED_APP = "This app cannot connect to the family Skylight.";
+
+function refuseApp(): Response {
+  return new Response(NOT_ALLOWED_APP, { status: 400, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+/** Only allowlisted apps: CIMD clients from Claude's and OpenAI's hosts, and every redirect URI on the allowlist. */
+function appAllowed(authRequest: AuthRequest, client: ClientInfo): boolean {
+  if (isCimdClientId(client.clientId) && !isAllowedCimdClientId(client.clientId)) return false;
+  if (isCimdClientId(authRequest.clientId) && !isAllowedCimdClientId(authRequest.clientId)) return false;
+  return isAllowedRedirectUri(authRequest.redirectUri) && client.redirectUris.every(isAllowedRedirectUri);
+}
+
 export async function handleAuthorize(request: Request, deps: GoogleDeps): Promise<Response> {
   const settings = googleSettings(deps.env);
   if (request.method === "GET") {
+    // Refuse a foreign CIMD client before the library fetches its metadata document.
+    const rawClientId = new URL(request.url).searchParams.get("client_id") ?? "";
+    if (isCimdClientId(rawClientId) && !isAllowedCimdClientId(rawClientId)) return refuseApp();
     let authRequest: AuthRequest;
     let client: ClientInfo | null;
     try {
@@ -259,6 +277,7 @@ export async function handleAuthorize(request: Request, deps: GoogleDeps): Promi
       return authorizeError(e);
     }
     if (client === null) return messagePage(400, "Can't connect", "This app is not registered with the family Skylight server.");
+    if (!appAllowed(authRequest, client)) return refuseApp();
     if (settings === null) return messagePage(503, "Not set up yet", NOT_SET_UP);
     const consent = await deps.oauth.beginConsent(authRequest);
     const headers = consent.headers;

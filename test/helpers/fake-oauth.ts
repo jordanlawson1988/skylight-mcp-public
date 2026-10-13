@@ -1,12 +1,14 @@
 import type { AuthRequest, ClientInfo, OAuthApi } from "../../src/remote/google.js";
 
 /** A stand-in for the library's env.OAUTH_PROVIDER helpers: single-use handles and states, recorded completions. */
-export function createFakeOAuth(opts: { client?: Partial<ClientInfo> | null; parseError?: Error } = {}) {
+export function createFakeOAuth(opts: { client?: Partial<ClientInfo> | null; parseError?: Error; request?: Partial<AuthRequest> } = {}) {
   const request: AuthRequest = {
     responseType: "code", clientId: "client-1", redirectUri: "https://claude.ai/api/mcp/auth_callback", scope: ["skylight"],
     state: "client-state", codeChallenge: "challenge", codeChallengeMethod: "S256", resource: "https://example.test/mcp", issuer: "https://example.test",
+    ...(opts.request ?? {}),
   };
-  const client: ClientInfo | null = opts.client === null ? null : { clientId: "client-1", clientName: "Claude", redirectUris: [request.redirectUri], tokenEndpointAuthMethod: "none", ...(opts.client ?? {}) };
+  const client: ClientInfo | null = opts.client === null ? null : { clientId: request.clientId, clientName: "Claude", redirectUris: [request.redirectUri], tokenEndpointAuthMethod: "none", ...(opts.client ?? {}) };
+  const counts = { parse: 0, consent: 0 };
   const consents = new Set<string>();
   const upstreams = new Map<string, { request: AuthRequest; data: unknown }>();
   const completed: Array<{ userId: string; scope: string[]; props: unknown; metadata: unknown }> = [];
@@ -15,9 +17,9 @@ export function createFakeOAuth(opts: { client?: Partial<ClientInfo> | null; par
   let n = 0;
   const authError = (description: string) => Object.assign(new Error(description), { name: "AuthorizationError", code: "invalid_request", description });
   const oauth: OAuthApi = {
-    async parseAuthRequest() { if (opts.parseError) throw opts.parseError; return request; },
+    async parseAuthRequest() { counts.parse += 1; if (opts.parseError) throw opts.parseError; return request; },
     async lookupClient(id) { return client && id === client.clientId ? client : null; },
-    async beginConsent() { const handle = `handle-${++n}`; consents.add(handle); return { handle, headers: new Headers({ "Set-Cookie": `__Host-oauth-consent=${handle}`, "X-Frame-Options": "DENY" }) }; },
+    async beginConsent() { counts.consent += 1; const handle = `handle-${++n}`; consents.add(handle); return { handle, headers: new Headers({ "Set-Cookie": `__Host-oauth-consent=${handle}`, "X-Frame-Options": "DENY" }) }; },
     async approveConsent(_req, handle, o) {
       if (!consents.delete(handle)) throw authError("consent handle missing or used");
       return { request: { ...request, scope: o?.scope ?? request.scope }, headers: new Headers({ "Cache-Control": "no-store" }) };
@@ -54,5 +56,5 @@ export function createFakeOAuth(opts: { client?: Partial<ClientInfo> | null; par
     },
     async revokeGrant(grantId, userId) { revoked.push({ grantId, userId }); },
   };
-  return { oauth, request, consents, upstreams, completed, revoked, grants };
+  return { oauth, request, consents, upstreams, completed, revoked, grants, counts };
 }
