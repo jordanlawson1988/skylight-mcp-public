@@ -54,3 +54,24 @@ test("core files use no Node-only globals and do not reach into the CLI, the Mac
   }
   assert.deepEqual(offenders, []);
 });
+
+/** Everything the Worker bundles: the shared core plus src/remote. */
+function workerFiles(): string[] {
+  const out = [...coreFiles()];
+  const walk = (rel: string) => {
+    for (const entry of readdirSync(path.join(root, rel), { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.name.endsWith(".ts")) out.push(child);
+    }
+  };
+  walk("src/remote");
+  return out.sort();
+}
+
+test("Worker code never asks fetch for redirect: \"error\" (the Workers runtime throws a TypeError for it)", () => {
+  const files = workerFiles();
+  assert.ok(files.includes("src/remote/google.ts") && files.includes("src/skylight/oauth.ts"));
+  const offenders = files.filter((file) => /redirect\s*:\s*["']error["']/.test(code(file)));
+  assert.deepEqual(offenders, []);
+});

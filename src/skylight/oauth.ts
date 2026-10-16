@@ -134,7 +134,8 @@ async function tokenRequest(opts: {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
       body: opts.form,
-      redirect: "error",
+      // Never follow a redirect: a 3xx answer is !res.ok below. ("error" would say the same, but Workers throws on it.)
+      redirect: "manual",
       signal: controller.signal,
     });
     const text = await res.text();

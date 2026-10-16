@@ -136,14 +136,17 @@ test("error excerpt is at most 500 characters", async () => {
   );
 });
 
-test("token request is sent with redirect: error", async () => {
+test("token request is sent with redirect: manual (Workers rejects \"error\"), and a redirect answer is a failure", async () => {
   const p = createPendingLogin();
   let redirect: RequestInit["redirect"];
   const { fetch } = createMockFetch([
     { method: "POST", path: "/oauth/token", handler: ({ init }) => { redirect = init.redirect; return { json: { access_token: "A", refresh_token: "R", expires_in: 10 } }; } },
   ]);
   await exchangeCode({ fetch, apiBaseUrl: BASE, code: "CODE1234", pending: p, timeoutMs: 1000 });
-  assert.equal(redirect, "error");
+  assert.equal(redirect, "manual");
+
+  const { fetch: redirecting } = createMockFetch([{ method: "POST", path: "/oauth/token", status: 302, text: "" }]);
+  await assert.rejects(exchangeCode({ fetch: redirecting, apiBaseUrl: BASE, code: "CODE1234", pending: createPendingLogin(), timeoutMs: 1000 }), (e: unknown) => e instanceof AuthError && /\(302\)/.test(e.message));
 });
 
 test("refreshCredential posts refresh grant and keeps fingerprint", async () => {

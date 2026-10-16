@@ -105,12 +105,34 @@ test("exchangeGoogleCode posts the code with PKCE and returns the ID token", asy
   assert.deepEqual(calls[0]!.body, { grant_type: "authorization_code", code: "G-CODE", client_id: CLIENT_ID, client_secret: "google-secret-value", redirect_uri: `${ORIGIN}/callback`, code_verifier: "VERIFIER" });
 });
 
-test("a failed Google exchange never repeats the response body or the secret", async () => {
-  const { fetch } = createMockFetch([{ method: "POST", path: "/token", status: 400, json: { error: "invalid_grant", echo: "google-secret-value" } }]);
+test("a failed Google exchange names the status and Google's standard error code, never the body or the secret", async () => {
+  const { fetch } = createMockFetch([{ method: "POST", path: "/token", status: 401, json: { error: "invalid_client", error_description: "Unauthorized", echo: "google-secret-value" } }]);
   await assert.rejects(
     exchangeGoogleCode({ fetch, clientId: CLIENT_ID, clientSecret: "google-secret-value", code: "G-CODE", codeVerifier: "V", redirectUri: `${ORIGIN}/callback` }),
-    (e: unknown) => e instanceof Error && /400/.test(e.message) && !e.message.includes("google-secret-value") && !e.message.includes("invalid_grant"),
+    (e: unknown) => e instanceof Error && e.message === "Google token exchange failed (401 invalid_client).",
   );
+});
+
+test("the Google exchange is sent with redirect: manual (Workers rejects \"error\"), and a redirect answer is a failure", async () => {
+  let redirect: RequestInit["redirect"];
+  const { fetch } = createMockFetch([{ method: "POST", path: "/token", handler: ({ init }) => { redirect = init.redirect; return { json: { id_token: "ID.TOKEN.X" } }; } }]);
+  await exchangeGoogleCode({ fetch, clientId: CLIENT_ID, clientSecret: "google-secret-value", code: "G-CODE", codeVerifier: "V", redirectUri: `${ORIGIN}/callback` });
+  assert.equal(redirect, "manual");
+  const { fetch: redirecting } = createMockFetch([{ method: "POST", path: "/token", status: 302, text: "" }]);
+  await assert.rejects(
+    exchangeGoogleCode({ fetch: redirecting, clientId: CLIENT_ID, clientSecret: "google-secret-value", code: "G-CODE", codeVerifier: "V", redirectUri: `${ORIGIN}/callback` }),
+    (e: unknown) => e instanceof Error && e.message === "Google token exchange failed (302).",
+  );
+});
+
+test("an error code outside OAuth's standard list is left out of the message", async () => {
+  for (const error of ["google-secret-value", "<b>invalid_client</b>", 42]) {
+    const { fetch } = createMockFetch([{ method: "POST", path: "/token", status: 400, json: { error } }]);
+    await assert.rejects(
+      exchangeGoogleCode({ fetch, clientId: CLIENT_ID, clientSecret: "google-secret-value", code: "G-CODE", codeVerifier: "V", redirectUri: `${ORIGIN}/callback` }),
+      (e: unknown) => e instanceof Error && e.message === "Google token exchange failed (400).",
+    );
+  }
 });
 
 // ---- the /authorize and /callback handlers ----
@@ -189,6 +211,19 @@ test("an allowlisted, verified Google account completes the MCP authorization as
   assert.match(out.headers.get("location") ?? "", /^https:\/\/claude\.ai\/api\/mcp\/auth_callback\?code=MCP-CODE/);
   assert.deepEqual(fake.completed, [{ userId: "jordan@example.com", scope: ["skylight"], props: { email: "jordan@example.com", name: "Jordan", sub: "123" }, metadata: { label: "Jordan" } }]);
   assert.equal((calls[0]!.body as Record<string, string>).code, "G-CODE");
+});
+
+test("a failed Google exchange shows the retry page and logs one line with Google's error code", async (t) => {
+  const logged = t.mock.method(console, "error", () => {});
+  const { deps } = await startFlow();
+  const to = new URL((await approve(deps, "handle-1")).headers.get("location")!);
+  const { fetch } = createMockFetch([{ method: "POST", path: "/token", status: 401, json: { error: "invalid_client", echo: "google-secret-value" } }]);
+  const out = await handleCallback(new Request(`${ORIGIN}/callback?code=G-CODE&state=${to.searchParams.get("state")}`), { ...deps, fetch });
+  assert.equal(out.status, 502);
+  assert.equal(logged.mock.callCount(), 1);
+  const line = String(logged.mock.calls[0]!.arguments[0]);
+  assert.deepEqual(JSON.parse(line), { path: "/callback", error: "Google token exchange failed (401 invalid_client)." });
+  assert.ok(!line.includes("google-secret-value") && !line.includes("G-CODE"));
 });
 
 test("the callback state works once", async () => {

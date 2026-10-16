@@ -127,6 +127,18 @@ export function verifyIdTokenClaims(claims: Record<string, unknown>, o: { client
   return { email, name, sub: claims.sub };
 }
 
+/** RFC 6749 section 5.2 token error codes: a fixed vocabulary, safe to log (the response body itself never is). */
+const TOKEN_ERROR_CODES = new Set(["invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope"]);
+
+function tokenErrorCode(text: string): string | null {
+  try {
+    const error = (JSON.parse(text) as Record<string, unknown> | null)?.error;
+    return typeof error === "string" && TOKEN_ERROR_CODES.has(error) ? error : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function exchangeGoogleCode(o: {
   fetch: typeof globalThis.fetch; clientId: string; clientSecret: string; code: string; codeVerifier: string; redirectUri: string;
 }): Promise<string> {
@@ -137,11 +149,15 @@ export async function exchangeGoogleCode(o: {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "authorization_code", code: o.code, client_id: o.clientId, client_secret: o.clientSecret, redirect_uri: o.redirectUri, code_verifier: o.codeVerifier }),
-      redirect: "error",
+      // Never follow a redirect: a 3xx answer is !res.ok below. ("error" would say the same, but Workers throws on it.)
+      redirect: "manual",
       signal: controller.signal,
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`Google token exchange failed (${res.status}).`);
+    if (!res.ok) {
+      const code = tokenErrorCode(text);
+      throw new Error(`Google token exchange failed (${res.status}${code ? ` ${code}` : ""}).`);
+    }
     let json: unknown;
     try { json = JSON.parse(text); } catch { throw new Error("Google token exchange returned invalid JSON."); }
     const idToken = (json as Record<string, unknown> | null)?.id_token;
@@ -346,7 +362,9 @@ export async function handleCallback(request: Request, deps: GoogleDeps): Promis
   let idToken: string;
   try {
     idToken = await exchangeGoogleCode({ fetch: deps.fetch, clientId: settings.clientId, clientSecret: settings.clientSecret, code, codeVerifier: verifier, redirectUri: callbackUrl(request) });
-  } catch {
+  } catch (e) {
+    // exchangeGoogleCode's messages are our own text: the status and a standard OAuth error code, never the body.
+    console.error(JSON.stringify({ path: "/callback", error: e instanceof Error ? e.message : "Google token exchange failed." }));
     return messagePage(502, "Google sign-in did not finish", "Google sign-in did not complete. Start connecting again from the app.", resumed.headers);
   }
   let who: FamilyProps;
