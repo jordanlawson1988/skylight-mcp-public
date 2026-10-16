@@ -39,7 +39,7 @@ export interface RemoteDeps {
   find?: (o: { since: number }) => Promise<string | null>;
 }
 
-export const REMOTE_USAGE = `Shared server (Claude and ChatGPT on any device):
+export const REMOTE_USAGE = `Shared server (Claude, ChatGPT and Gemini on any device):
   skylight-mcp remote setup --env staging|production --url <https://...workers.dev>
                                                              Save the URL, generate and upload SKYLIGHT_TOKEN_KEY and ADMIN_TOKEN
   skylight-mcp remote login --env staging|production       Sign the shared server in to Skylight (its own grant)
@@ -205,7 +205,7 @@ Still to do, in order:
        npx wrangler secret put ALLOWED_EMAILS --env ${args.env}      (comma-separated Google emails)
   3. Deploy: npm run remote:deploy:${args.env}
   4. Sign the server in to Skylight: skylight-mcp remote login --env ${args.env}
-  5. Add the connector in Claude or ChatGPT with the URL ${url}/mcp
+  5. Add the connector in Claude, ChatGPT or Gemini with the URL ${url}/mcp
 `);
 }
 

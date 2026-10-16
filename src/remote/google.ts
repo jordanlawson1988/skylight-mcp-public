@@ -193,7 +193,7 @@ export function messagePage(status: number, title: string, message: string, extr
   return new Response(shell(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>`), { status, headers });
 }
 
-export const CONSENT_WARNING = "Only continue if you just started connecting from Claude or ChatGPT.";
+export const CONSENT_WARNING = "Only continue if you just started connecting from Claude, ChatGPT or Gemini.";
 
 /**
  * The consent page. The app is named from where access will be sent (appNameForRedirect), not from the name the client
@@ -274,7 +274,7 @@ function authorizeError(e: unknown): Response {
 }
 
 /** GET /authorize shows the consent page; POST /authorize (the page's form) approves or declines it. */
-/** The refusal for an app that is not Claude or ChatGPT: plain text, no detail about why. */
+/** The refusal for an app that is not Claude, ChatGPT or Gemini: plain text, no detail about why. */
 export const NOT_ALLOWED_APP = "This app cannot connect to the family Skylight.";
 
 function refuseApp(): Response {

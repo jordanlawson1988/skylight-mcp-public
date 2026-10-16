@@ -32,12 +32,12 @@ test("the server instructions cover the confirm-gated and email-sending actions"
 });
 
 test("the README explains the shared server: every remote command, every secret, the redirect and connector URLs", () => {
-  const start = readme.indexOf("## Use from Claude and ChatGPT on any device");
+  const start = readme.indexOf("## Use from Claude, ChatGPT and Gemini on any device");
   assert.ok(start > 0, "README lacks the shared-server section");
   const section = readme.slice(start, readme.indexOf("\n## ", start + 10));
   for (const cmd of REMOTE_COMMANDS) assert.ok(section.includes(`skylight-mcp remote ${cmd}`), `section lacks remote ${cmd}`);
   for (const secret of REMOTE_SECRETS) assert.ok(section.includes(secret), `section lacks ${secret}`);
-  for (const phrase of ["npx wrangler login", "/callback", ".workers.dev/mcp", "This Google account is not on the family list.", "skylight_recent_activity", "90 days", "Developer mode", "Add custom connector"]) {
+  for (const phrase of ["npx wrangler login", "/callback", ".workers.dev/mcp", "This Google account is not on the family list.", "skylight_recent_activity", "90 days", "Developer mode", "Add custom connector", "Custom apps", "Keep Activity", "oauth-redirect.googleusercontent.com"]) {
     assert.ok(section.includes(phrase), `section lacks ${phrase}`);
   }
 });

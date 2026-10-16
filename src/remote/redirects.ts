@@ -4,7 +4,7 @@
  * (google.ts), so a client registered before the list existed is still checked.
  */
 
-/** Exact strings: Claude (both domains) and ChatGPT's platform redirect. */
+/** Exact strings: Claude (both domains) and ChatGPT's platform redirect. The patterns below add ChatGPT connectors, Gemini and Claude Code. */
 export const ALLOWED_REDIRECT_URIS = [
   "https://claude.ai/api/mcp/auth_callback",
   "https://claude.com/api/mcp/auth_callback",
@@ -13,6 +13,11 @@ export const ALLOWED_REDIRECT_URIS = [
 
 /** ChatGPT's per-connector callback: exactly one path segment of [A-Za-z0-9_-]. */
 const CHATGPT_CONNECTOR_REDIRECT = /^https:\/\/chatgpt\.com\/connector\/oauth\/[A-Za-z0-9_-]+$/;
+/**
+ * A Gemini custom app (Gemini web, then the Gemini mobile apps): Google's OAuth redirect service with a per-user,
+ * per-connector id. Only the user_bound_custom-mcp- prefix: other Google products share /r/<id> on the same host.
+ */
+const GEMINI_CUSTOM_APP_REDIRECT = /^https:\/\/oauth-redirect\.googleusercontent\.com\/r\/user_bound_custom-mcp-[A-Za-z0-9_-]+$/;
 /** Claude Code's local callback: http, localhost or 127.0.0.1, any port, path /callback. */
 const LOOPBACK_REDIRECT = /^http:\/\/(?:localhost|127\.0\.0\.1):([0-9]{1,5})\/callback$/;
 
@@ -20,11 +25,12 @@ const LOOPBACK_REDIRECT = /^http:\/\/(?:localhost|127\.0\.0\.1):([0-9]{1,5})\/ca
 export const CIMD_CLIENT_HOSTS = ["claude.ai", "claude.com", "chatgpt.com", "openai.com"] as const;
 
 /** What the consent page calls each app: decided by where access is sent, never by the name the client gives itself. */
-export const APP_NAMES = { claude: "Claude", chatgpt: "ChatGPT", claudeCode: "Claude Code on this computer" } as const;
+export const APP_NAMES = { claude: "Claude", chatgpt: "ChatGPT", gemini: "Gemini", claudeCode: "Claude Code on this computer" } as const;
 
 export function appNameForRedirect(uri: string): string {
   if (!isAllowedRedirectUri(uri)) return "an unknown app";
   if (LOOPBACK_REDIRECT.test(uri)) return APP_NAMES.claudeCode;
+  if (GEMINI_CUSTOM_APP_REDIRECT.test(uri)) return APP_NAMES.gemini;
   const host = new URL(uri).hostname;
   return host === "chatgpt.com" ? APP_NAMES.chatgpt : APP_NAMES.claude;
 }
@@ -33,6 +39,7 @@ export function isAllowedRedirectUri(uri: unknown): boolean {
   if (typeof uri !== "string") return false;
   if ((ALLOWED_REDIRECT_URIS as readonly string[]).includes(uri)) return true;
   if (CHATGPT_CONNECTOR_REDIRECT.test(uri)) return true;
+  if (GEMINI_CUSTOM_APP_REDIRECT.test(uri)) return true;
   const loopback = LOOPBACK_REDIRECT.exec(uri);
   if (loopback) {
     const port = Number(loopback[1]);
@@ -66,5 +73,5 @@ export function isAllowedCimdClientId(clientId: string): boolean {
 export function clientRegistrationCallback(options: { clientMetadata: Record<string, unknown>; request: Request }): { code: string; description: string; status: number } | undefined {
   const uris = options.clientMetadata.redirect_uris;
   const ok = Array.isArray(uris) && uris.length > 0 && uris.every(isAllowedRedirectUri);
-  return ok ? undefined : { code: "invalid_redirect_uri", description: "This server only accepts Claude and ChatGPT redirect URIs.", status: 400 };
+  return ok ? undefined : { code: "invalid_redirect_uri", description: "This server only accepts Claude, ChatGPT and Gemini redirect URIs.", status: 400 };
 }

@@ -14,7 +14,7 @@ export { SkylightAccount };
 
 /**
  * The shared skylight-mcp server on Cloudflare Workers. @cloudflare/workers-oauth-provider is the OAuth 2.1
- * authorization server for Claude and ChatGPT (discovery, /token, /register, CIMD) and guards /mcp; everything else
+ * authorization server for Claude, ChatGPT and Gemini (discovery, /token, /register, CIMD) and guards /mcp; everything else
  * (the Google sign-in pages, /admin, /health) is the defaultHandler below.
  */
 

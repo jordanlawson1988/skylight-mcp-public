@@ -4,7 +4,7 @@ import {
   ALLOWED_REDIRECT_URIS, CIMD_CLIENT_HOSTS, clientRegistrationCallback, isAllowedCimdClientId, isAllowedRedirectUri, isCimdClientId,
 } from "../../src/remote/redirects.js";
 
-test("the exact redirect allowlist: Claude, ChatGPT and loopback /callback for Claude Code", () => {
+test("the exact redirect allowlist: Claude, ChatGPT, Gemini custom apps and loopback /callback for Claude Code", () => {
   assert.deepEqual([...ALLOWED_REDIRECT_URIS], [
     "https://claude.ai/api/mcp/auth_callback",
     "https://claude.com/api/mcp/auth_callback",
@@ -16,6 +16,8 @@ test("the exact redirect allowlist: Claude, ChatGPT and loopback /callback for C
     "http://localhost:3334/callback",
     "http://127.0.0.1:65535/callback",
     "http://localhost:1/callback",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc123-skylight-mcp-staging_example_workers_dev",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-x",
   ]) assert.equal(isAllowedRedirectUri(ok), true, ok);
 });
 
@@ -45,6 +47,20 @@ test("anything else is refused, including near misses", () => {
     "http://[::1]:3334/callback",
     "http://user@localhost:3334/callback",
     "https://attacker.example/callback",
+    "https://oauth-redirect.googleusercontent.com/r/my-actions-project",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-",
+    "http://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc/x",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc/",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc?x=1",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc#f",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-a.b",
+    "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-a%2Fb",
+    "https://OAUTH-REDIRECT.googleusercontent.com/r/user_bound_custom-mcp-abc",
+    "https://evil.oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc",
+    "https://oauth-redirect.googleusercontent.com.evil.test/r/user_bound_custom-mcp-abc",
+    "https://oauth-redirect.googleusercontent.com/user_bound_custom-mcp-abc",
+    "https://oauth-redirect.googleusercontent.com:443/r/user_bound_custom-mcp-abc",
     "",
     " https://claude.ai/api/mcp/auth_callback",
   ]) assert.equal(isAllowedRedirectUri(bad), false, bad);
@@ -67,6 +83,7 @@ test("dynamic client registration is refused unless every redirect_uri is on the
   const call = (clientMetadata: Record<string, unknown>) => clientRegistrationCallback({ clientMetadata, request: new Request("https://x.test/register", { method: "POST" }) });
   assert.equal(call({ redirect_uris: ["https://claude.ai/api/mcp/auth_callback"] }), undefined);
   assert.equal(call({ redirect_uris: ["https://claude.ai/api/mcp/auth_callback", "http://localhost:4000/callback"] }), undefined);
+  assert.equal(call({ redirect_uris: ["https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-abc123-skylight-mcp_example_workers_dev"] }), undefined);
   for (const bad of [
     { redirect_uris: ["https://claude.ai/api/mcp/auth_callback", "https://attacker.example/cb"] },
     { redirect_uris: [] },
