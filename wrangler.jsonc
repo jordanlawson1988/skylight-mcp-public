@@ -10,6 +10,8 @@
 //   GOOGLE_CLIENT_SECRET
 //   ALLOWED_EMAILS        comma-separated Google accounts allowed to sign in
 // For `wrangler dev`, put dummy values in .dev.vars (gitignored).
+// There is deliberately no `secrets.required`: wrangler would refuse the first deploy (secrets cannot be set before
+// the Worker exists). The Worker fails closed on each missing secret: sign-in answers "Not set up yet" and /admin 503.
 //
 // Bindings and vars are not inherited by environments, so each env repeats them. The KV namespace has no id:
 // wrangler provisions one automatically on the first deploy of each environment. The rate limiters (Workers Rate
@@ -48,7 +50,6 @@
     { "name": "RL_REGISTER_GLOBAL", "namespace_id": "3005", "simple": { "limit": 20, "period": 60 } }
   ],
   "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" },
-  "secrets": { "required": ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] },
   "env": {
     "staging": {
       "name": "skylight-mcp-staging",
@@ -66,8 +67,7 @@
         { "name": "RL_TOKEN", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } },
         { "name": "RL_REGISTER_GLOBAL", "namespace_id": "1005", "simple": { "limit": 20, "period": 60 } }
       ],
-      "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" },
-      "secrets": { "required": ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] }
+      "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" }
     },
     "production": {
       "name": "skylight-mcp",
@@ -85,8 +85,7 @@
         { "name": "RL_TOKEN", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } },
         { "name": "RL_REGISTER_GLOBAL", "namespace_id": "2005", "simple": { "limit": 20, "period": 60 } }
       ],
-      "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" },
-      "secrets": { "required": ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] }
+      "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" }
     }
   }
 }

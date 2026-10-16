@@ -31,7 +31,7 @@ interface EnvConfig {
   kv_namespaces: Array<{ binding: string; id?: string }>;
   ratelimits: Array<{ name: string; namespace_id: string; simple: { limit: number; period: number } }>;
   vars: Record<string, string>;
-  secrets: { required: string[] };
+  secrets?: unknown;
   workers_dev: boolean;
   preview_urls: boolean;
 }
@@ -85,9 +85,11 @@ test("the npm scripts only deploy or run a named environment", () => {
   }
 });
 
-test("the required secrets match REMOTE_SECRETS everywhere, and no secret is a plain var", () => {
-  for (const env of [config, config.env.staging, config.env.production]) {
-    assert.deepEqual(env.secrets.required, [...REMOTE_SECRETS]);
+test("no environment declares required secrets (a new Worker could never deploy), and no secret is a plain var", () => {
+  // wrangler refuses to deploy while a `secrets.required` name is unset, and secrets cannot be set on a Worker that
+  // does not exist yet, so the first deploy would always fail. The Worker fails closed on each missing secret instead.
+  for (const [label, env] of [["top", config], ["staging", config.env.staging], ["production", config.env.production]] as const) {
+    assert.equal(env.secrets, undefined, label);
     for (const name of REMOTE_SECRETS) assert.ok(!(name in env.vars), `${name} must not be a var`);
   }
 });
