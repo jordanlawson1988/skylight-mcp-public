@@ -40,7 +40,7 @@ This is an unofficial project. It is not affiliated with, endorsed by or support
 The package is named `@jordanlawson/skylight-mcp` but it is not published to npm. Install from source. Node 20 or newer is required.
 
 ```sh
-git clone https://github.com/jordanlawson1988/skylight-mcp
+git clone https://github.com/jordanlawson1988/skylight-mcp-public skylight-mcp
 cd skylight-mcp
 npm install
 npm run build
