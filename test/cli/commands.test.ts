@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startLogin, completeLogin, completeLoginFromChrome, NO_CHROME_CALLBACK_MESSAGE, logout, status } from "../../src/cli/commands.js";
+import { startLogin, completeLogin, completeLoginFromChrome, exchangeLogin, NO_CHROME_CALLBACK_MESSAGE, logout, status, tryCompleteLoginFromChrome } from "../../src/cli/commands.js";
 import { createRuntime, assertMacOS } from "../../src/runtime.js";
 import { createFakeKeychain } from "../helpers/fake-keychain.js";
 import { createMockFetch, type MockRoute } from "../helpers/mock-fetch.js";
@@ -139,5 +139,37 @@ test("completeLoginFromChrome reports a clear error (without telling the user to
 test("completeLoginFromChrome without a pending login fails before searching", async () => {
   const { runtime, cleanup } = await rt([]);
   await assert.rejects(completeLoginFromChrome(runtime, async () => { throw new Error("should not search"); }), /skylight-mcp login/);
+  await cleanup();
+});
+
+test("exchangeLogin returns the credential and clears the pending login without touching the local credential", async () => {
+  const { runtime, items, cleanup } = await rt([
+    { method: "POST", path: "/oauth/token", json: { access_token: "REMOTE-AT", refresh_token: "REMOTE-RT", expires_in: 3600 } },
+  ]);
+  await runtime.store.write({ version: 1, accessToken: "LOCAL-AT", refreshToken: "LOCAL-RT", fingerprint: "f", expiresAt: 123 });
+  const keychainBefore = new Map(items);
+  const { url } = await startLogin(runtime);
+  const state = new URL(url).searchParams.get("state")!;
+  const pending = (await runtime.store.readPendingLogin())!;
+  const cred = await exchangeLogin(runtime, `https://ourskylight.com/welcome?code=C&state=${state}`);
+  assert.equal(cred.accessToken, "REMOTE-AT");
+  assert.equal(cred.refreshToken, "REMOTE-RT");
+  assert.equal(cred.fingerprint, pending.fingerprint);
+  assert.equal(await runtime.store.readPendingLogin(), null);
+  const local = (await runtime.store.read())!;
+  assert.equal(local.accessToken, "LOCAL-AT");
+  assert.equal(local.refreshToken, "LOCAL-RT");
+  assert.deepEqual(items, keychainBefore);
+  await cleanup();
+});
+
+test("tryCompleteLoginFromChrome hands the callback to the given completion", async () => {
+  const { runtime, cleanup } = await rt([]);
+  await startLogin(runtime);
+  const seen: string[] = [];
+  const r = await tryCompleteLoginFromChrome(runtime, async () => "https://ourskylight.com/welcome?code=C&state=S", async (_rt, url) => { seen.push(url); return { expiresAt: 5 }; });
+  assert.deepEqual(r, { expiresAt: 5 });
+  assert.deepEqual(seen, ["https://ourskylight.com/welcome?code=C&state=S"]);
+  assert.equal(await runtime.store.read(), null);
   await cleanup();
 });

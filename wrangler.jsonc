@@ -1,0 +1,91 @@
+// The shared skylight-mcp server (Cloudflare Workers). Always pick an environment: `npm run remote:deploy:staging`
+// or `npm run remote:deploy:production` (`wrangler ... --env staging|production`); see README "Use from Claude and
+// ChatGPT on any device". The top level is only a local default (`skylight-mcp-dev`, no workers.dev route).
+//
+// Nothing secret belongs in this file. Secrets are set per environment with `wrangler secret put <NAME> --env <env>`
+// (`skylight-mcp remote setup` puts SKYLIGHT_TOKEN_KEY and ADMIN_TOKEN itself):
+//   SKYLIGHT_TOKEN_KEY    32 random bytes, base64: encrypts the server's stored Skylight credential
+//   ADMIN_TOKEN           bearer token for /admin/* (kept in the Mac Keychain by `remote setup`)
+//   GOOGLE_CLIENT_ID      Google OAuth client (Web application)
+//   GOOGLE_CLIENT_SECRET
+//   ALLOWED_EMAILS        comma-separated Google accounts allowed to sign in
+// For `wrangler dev`, put dummy values in .dev.vars (gitignored).
+// There is deliberately no `secrets.required`: wrangler would refuse the first deploy (secrets cannot be set before
+// the Worker exists). The Worker fails closed on each missing secret: sign-in answers "Not set up yet" and /admin 503.
+//
+// Bindings and vars are not inherited by environments, so each env repeats them. The KV namespace has no id:
+// wrangler provisions one automatically on the first deploy of each environment. The rate limiters (Workers Rate
+// Limiting binding, in-memory counters, no storage writes) need a namespace_id unique in the account; each
+// environment has its own.
+//
+// Logging: invocation logs are off and query strings are redacted; the Worker logs one line per request with method,
+// path, status and duration only (src/remote/worker.ts). Request headers and bodies are never logged.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "skylight-mcp-dev",
+  "main": "src/remote/worker.ts",
+  "compatibility_date": "2026-09-27",
+  // nodejs_compat for library internals; global_fetch_strictly_public is required for CIMD (SSRF protection).
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "invocation_logs": false }
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "SKYLIGHT_ACCOUNT", "class_name": "SkylightAccount" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SkylightAccount"] }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+  // Per-client limits per minute (IPv4 address or IPv6 /64), plus RL_REGISTER_GLOBAL, one budget for /register across
+  // all clients; the same numbers as IP_RATE_LIMITS and GLOBAL_RATE_LIMITS in src/remote/edge-guard.ts (a test checks them).
+  "ratelimits": [
+    { "name": "RL_REGISTER", "namespace_id": "3001", "simple": { "limit": 5, "period": 60 } },
+    { "name": "RL_AUTHORIZE", "namespace_id": "3002", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RL_CALLBACK", "namespace_id": "3003", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RL_TOKEN", "namespace_id": "3004", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_REGISTER_GLOBAL", "namespace_id": "3005", "simple": { "limit": 20, "period": 60 } }
+  ],
+  "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" },
+  "env": {
+    "staging": {
+      "name": "skylight-mcp-staging",
+      "workers_dev": true,
+      "preview_urls": false,
+      "durable_objects": {
+        "bindings": [{ "name": "SKYLIGHT_ACCOUNT", "class_name": "SkylightAccount" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SkylightAccount"] }],
+      "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+      "ratelimits": [
+        { "name": "RL_REGISTER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_AUTHORIZE", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RL_CALLBACK", "namespace_id": "1003", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RL_TOKEN", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_REGISTER_GLOBAL", "namespace_id": "1005", "simple": { "limit": 20, "period": 60 } }
+      ],
+      "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" }
+    },
+    "production": {
+      "name": "skylight-mcp",
+      "workers_dev": true,
+      "preview_urls": false,
+      "durable_objects": {
+        "bindings": [{ "name": "SKYLIGHT_ACCOUNT", "class_name": "SkylightAccount" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SkylightAccount"] }],
+      "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+      "ratelimits": [
+        { "name": "RL_REGISTER", "namespace_id": "2001", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_AUTHORIZE", "namespace_id": "2002", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RL_CALLBACK", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RL_TOKEN", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_REGISTER_GLOBAL", "namespace_id": "2005", "simple": { "limit": 20, "period": 60 } }
+      ],
+      "vars": { "SKYLIGHT_TIMEZONE": "America/New_York" }
+    }
+  }
+}

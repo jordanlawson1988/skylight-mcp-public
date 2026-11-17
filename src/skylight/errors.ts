@@ -7,10 +7,15 @@ export class ValidationError extends Error {
   }
 }
 
+/** "session_expired": Skylight refused the refresh token (400/401), so only a new sign-in helps. */
+export type AuthErrorCode = "session_expired";
+
 export class AuthError extends Error {
-  constructor(message: string) {
+  readonly code: AuthErrorCode | undefined;
+  constructor(message: string, code?: AuthErrorCode) {
     super(message);
     this.name = "AuthError";
+    this.code = code;
   }
 }
 

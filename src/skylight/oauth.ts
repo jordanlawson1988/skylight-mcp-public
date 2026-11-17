@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { bytesEqual, bytesToBase64Url, randomBytes, sha256, utf8 } from "./encoding.js";
 import { AuthError } from "./errors.js";
 import { excerpt } from "./redact.js";
 
@@ -6,6 +6,15 @@ export const CLIENT_ID = "skylight-mobile";
 export const REDIRECT_URI = "https://ourskylight.com/welcome";
 export const SCOPE = "everything";
 export const PENDING_LOGIN_TTL_MS = 600_000;
+/** The command that signs this machine in again; the shared server passes `skylight-mcp remote login`. */
+export const DEFAULT_LOGIN_COMMAND = "skylight-mcp login";
+/** The command that signs the shared server in to Skylight. */
+export const REMOTE_LOGIN_COMMAND = "skylight-mcp remote login";
+/**
+ * How long a token refresh may take, separate from SKYLIGHT_REQUEST_TIMEOUT_MS: Skylight rotates the refresh token, so
+ * abandoning a refresh it already answered would lose the new token and with it the sign-in. Generous on purpose.
+ */
+export const REFRESH_TIMEOUT_MS = 30_000;
 
 export type PkceMethod = "S256" | "plain";
 
@@ -39,19 +48,19 @@ function deviceValues(fingerprint: string): Record<string, string> {
 
 export function createPendingLogin(now: number = Date.now(), method: PkceMethod = "S256"): PendingLogin {
   return {
-    state: randomBytes(32).toString("base64url"),
-    verifier: randomBytes(48).toString("base64url"),
-    fingerprint: randomUUID(),
+    state: bytesToBase64Url(randomBytes(32)),
+    verifier: bytesToBase64Url(randomBytes(48)),
+    fingerprint: crypto.randomUUID(),
     createdAt: now,
     method,
   };
 }
 
-export function pkceChallenge(verifier: string, method: PkceMethod): string {
-  return method === "plain" ? verifier : createHash("sha256").update(verifier).digest("base64url");
+export async function pkceChallenge(verifier: string, method: PkceMethod): Promise<string> {
+  return method === "plain" ? verifier : bytesToBase64Url(await sha256(verifier));
 }
 
-export function buildAuthorizeUrl(apiBaseUrl: string, pending: PendingLogin): string {
+export async function buildAuthorizeUrl(apiBaseUrl: string, pending: PendingLogin): Promise<string> {
   const url = new URL("/oauth/authorize", apiBaseUrl);
   url.search = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -59,7 +68,7 @@ export function buildAuthorizeUrl(apiBaseUrl: string, pending: PendingLogin): st
     redirect_uri: REDIRECT_URI,
     scope: SCOPE,
     state: pending.state,
-    code_challenge: pkceChallenge(pending.verifier, pending.method),
+    code_challenge: await pkceChallenge(pending.verifier, pending.method),
     code_challenge_method: pending.method,
     skylight_api_client_device_fingerprint: pending.fingerprint,
   }).toString();
@@ -67,14 +76,12 @@ export function buildAuthorizeUrl(apiBaseUrl: string, pending: PendingLogin): st
 }
 
 function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ab.length === bb.length && timingSafeEqual(ab, bb);
+  return bytesEqual(utf8(a), utf8(b));
 }
 
-export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now: number = Date.now()): { code: string } {
+export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now: number = Date.now(), loginCommand: string = DEFAULT_LOGIN_COMMAND): { code: string } {
   if (now - pending.createdAt > PENDING_LOGIN_TTL_MS) {
-    throw new AuthError("The login attempt expired. Run `skylight-mcp login` again.");
+    throw new AuthError(`The login attempt expired. Run \`${loginCommand}\` again.`);
   }
   let url: URL;
   try {
@@ -92,7 +99,7 @@ export function parseCallbackUrl(callbackUrl: string, pending: PendingLogin, now
   const state = url.searchParams.get("state");
   if (!code || !state) throw new AuthError("Callback URL is missing code or state.");
   if (!safeEqual(state, pending.state)) {
-    throw new AuthError("Callback state does not match this login attempt. Run `skylight-mcp login` again.");
+    throw new AuthError(`Callback state does not match this login attempt. Run \`${loginCommand}\` again.`);
   }
   if (!/^[A-Za-z0-9._~-]{1,512}$/.test(code)) throw new AuthError("Callback code has an unexpected format.");
   return { code };
@@ -117,8 +124,9 @@ function toCredential(json: unknown, fingerprint: string, fallbackRefreshToken?:
 
 async function tokenRequest(opts: {
   fetch: typeof globalThis.fetch; apiBaseUrl: string; form: URLSearchParams; fingerprint: string; timeoutMs: number; what: string;
-  secrets: readonly string[]; fallbackRefreshToken?: string;
+  secrets: readonly string[]; fallbackRefreshToken?: string; loginCommand?: string;
 }): Promise<OAuthCredential> {
+  const login = opts.loginCommand ?? DEFAULT_LOGIN_COMMAND;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
   try {
@@ -126,15 +134,16 @@ async function tokenRequest(opts: {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
       body: opts.form,
-      redirect: "error",
+      // Never follow a redirect: a 3xx answer is !res.ok below. ("error" would say the same, but Workers throws on it.)
+      redirect: "manual",
       signal: controller.signal,
     });
     const text = await res.text();
     if (!res.ok) {
       if (opts.what === "token refresh") {
-        if (res.status === 400 || res.status === 401) throw new AuthError("Your Skylight session expired or was revoked. Run `skylight-mcp login` again.");
+        if (res.status === 400 || res.status === 401) throw new AuthError(`Your Skylight session expired or was revoked. Run \`${login}\` again.`, "session_expired");
         const body = excerpt(text, opts.secrets).replace(/\.+$/, "");
-        throw new AuthError(`Skylight ${opts.what} failed (${res.status})${body ? `: ${body}` : ""}. Run \`skylight-mcp login\` if this persists.`);
+        throw new AuthError(`Skylight ${opts.what} failed (${res.status})${body ? `: ${body}` : ""}. Run \`${login}\` if this persists.`);
       }
       throw new AuthError(`Skylight ${opts.what} failed (${res.status}): ${excerpt(text, opts.secrets)}`);
     }
@@ -170,11 +179,14 @@ export function exchangeCode(opts: {
 
 export function refreshCredential(opts: {
   fetch: typeof globalThis.fetch; apiBaseUrl: string; credential: OAuthCredential; timeoutMs: number;
+  /** Named in the error text when the refresh fails; defaults to `skylight-mcp login`. */
+  loginCommand?: string;
 }): Promise<OAuthCredential> {
   return tokenRequest({
     fetch: opts.fetch, apiBaseUrl: opts.apiBaseUrl, timeoutMs: opts.timeoutMs, fingerprint: opts.credential.fingerprint, what: "token refresh",
     secrets: [opts.credential.refreshToken, opts.credential.accessToken],
     fallbackRefreshToken: opts.credential.refreshToken,
+    ...(opts.loginCommand ? { loginCommand: opts.loginCommand } : {}),
     form: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: opts.credential.refreshToken,

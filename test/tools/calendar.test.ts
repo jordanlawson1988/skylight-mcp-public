@@ -216,11 +216,77 @@ test("update event PUTs the master id with only the provided fields and apply_to
   await t.close();
 });
 
-test("update event: all-day dates imply all_day, profileIds and recurrence map to category_ids and rrule, composite ids use the master id", async () => {
+test("update event: profileIds and recurrence map to category_ids and rrule, composite ids use the master id", async () => {
   const t = await connectTestClient([FRAMES, CATEGORIES, lookupRoute([]), { method: "PUT", path: `${EVENTS}/11019627806`, json: { data: ev("11019627806", "x") } }]);
-  const r = await t.callTool("skylight_update_event", { eventId: "11019627806-1791803100", startDate: "2026-10-13", profileIds: ["12", "14"], recurrence: { frequency: "daily" }, countdown: false, timezone: "UTC" });
+  const r = await t.callTool("skylight_update_event", { eventId: "11019627806-1791803100", profileIds: ["12", "14"], recurrence: { frequency: "daily" }, countdown: false, timezone: "UTC" });
   assert.equal(r.isError, false);
-  assert.deepEqual(writes(t)[0]!.body, { starts_at: "2026-10-13", all_day: true, category_ids: ["12", "14"], rrule: ["RRULE:FREQ=DAILY"], countdown_enabled: false, timezone: "UTC" });
+  assert.deepEqual(writes(t)[0]!.body, { category_ids: ["12", "14"], rrule: ["RRULE:FREQ=DAILY"], countdown_enabled: false, timezone: "UTC" });
+  await t.close();
+});
+
+test("update event: all-day dates on a one-off event imply all_day", async () => {
+  const t = await connectTestClient([FRAMES, CATEGORIES, lookupRoute([ev("900", "Trip")]), { method: "PUT", path: `${EVENTS}/900`, json: { data: ev("900", "x") } }]);
+  const r = await t.callTool("skylight_update_event", { eventId: "900", startDate: "2026-10-13" });
+  assert.equal(r.isError, false);
+  assert.deepEqual(writes(t)[0]!.body, { starts_at: "2026-10-13", all_day: true });
+  await t.close();
+});
+
+// A weekly Saturday series at 5:00-6:45 AM Eastern (master 13717574259), as Skylight lists it: composite occurrence ids <masterId>-<unixSeconds>.
+const SERIES = "13717574259";
+const OCT17 = `${SERIES}-1792227600`; // Sat 2026-10-17 09:00Z = 5:00 AM EDT
+const OCT24 = `${SERIES}-1792832400`; // Sat 2026-10-24 09:00Z
+const seriesRows = [
+  ev(OCT17, "F3 Germantown", { recurring: true, rrule: ["RRULE:FREQ=WEEKLY;BYDAY=SA"], starts_at: "2026-10-17T09:00:00.000Z", ends_at: "2026-10-17T10:45:00.000Z" }),
+  ev(OCT24, "F3 Germantown", { recurring: true, rrule: ["RRULE:FREQ=WEEKLY;BYDAY=SA"], starts_at: "2026-10-24T09:00:00.000Z", ends_at: "2026-10-24T10:45:00.000Z" }),
+];
+const seriesClient = () => connectTestClient([FRAMES, CATEGORIES, lookupRoute(seriesRows), { method: "PUT", path: /\/calendar_events\//, json: { data: seriesRows[0] } }]);
+
+test("update event: a new time on a recurring series PUTs the occurrence on that day with apply_to all, never the bare master id", async () => {
+  // Skylight moves the series by (new start - the start of the occurrence in the path). With the bare master id it reads the id itself as
+  // unix seconds (the year 2404), which moved a live series to 1648 and shifted every occurrence to an odd time [live 2026-10-16].
+  for (const eventId of [SERIES, OCT17, OCT24]) {
+    const t = await seriesClient();
+    const r = await t.callTool("skylight_update_event", { eventId, startsAt: "2026-10-17T06:00", endsAt: "2026-10-17T07:45" });
+    assert.equal(r.isError, false, `${eventId}: ${r.text}`);
+    const put = writes(t);
+    assert.equal(put.length, 1);
+    assert.equal(put[0]!.url.pathname, `${EVENTS}/${OCT17}`, `${eventId}: the path names the occurrence on the new start's day`);
+    assert.deepEqual(put[0]!.body, { starts_at: "2026-10-17T06:00:00-04:00", ends_at: "2026-10-17T07:45:00-04:00", all_day: false, apply_to: "all" });
+    await t.close();
+  }
+});
+
+test("update event: a recurring series keeps its length when only startsAt changes", async () => {
+  const t = await seriesClient();
+  const r = await t.callTool("skylight_update_event", { eventId: SERIES, startsAt: "2026-10-24T06:00", applyTo: "all" });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(writes(t)[0]!.url.pathname, `${EVENTS}/${OCT24}`);
+  assert.deepEqual(writes(t)[0]!.body, { starts_at: "2026-10-24T06:00:00-04:00", ends_at: "2026-10-24T07:45:00-04:00", all_day: false, apply_to: "all" });
+  await t.close();
+});
+
+test("update event: recurring-series time changes it cannot place are refused with no PUT", async () => {
+  for (const [args, message] of [
+    [{ eventId: SERIES, startsAt: "2026-10-18T06:00", endsAt: "2026-10-18T07:45" }, /startsAt: must be on a day this recurring series occurs \(it has no occurrence on 2026-10-18\)/],
+    [{ eventId: OCT17, endsAt: "2026-10-17T07:45" }, /startsAt: is needed to change the times of a recurring series/],
+    [{ eventId: SERIES, startDate: "2026-10-18" }, /startDate: cannot move the days of a recurring all-day series/],
+  ] as const) {
+    const t = await seriesClient();
+    const r = await t.callTool("skylight_update_event", args);
+    assert.equal(r.isError, true, JSON.stringify(args));
+    assert.match(r.text, message);
+    assert.equal(writes(t).length, 0, JSON.stringify(args));
+    await t.close();
+  }
+});
+
+test("update event: non-time changes to a recurring series still go to the master id", async () => {
+  const t = await seriesClient();
+  const r = await t.callTool("skylight_update_event", { eventId: OCT24, title: "F3 Germantown (Q)", applyTo: "all" });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(writes(t)[0]!.url.pathname, `${EVENTS}/${SERIES}`);
+  assert.deepEqual(writes(t)[0]!.body, { summary: "F3 Germantown (Q)", apply_to: "all" });
   await t.close();
 });
 

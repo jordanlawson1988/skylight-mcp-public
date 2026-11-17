@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { createClient } from "../../src/skylight/client.js";
 import { SkylightApiError, AuthError } from "../../src/skylight/errors.js";
 import type { TokenProvider } from "../../src/skylight/auth.js";
-import { loadConfig } from "../../src/skylight/config.js";
+import { parseConfig } from "../../src/skylight/config.js";
 import { createMockFetch } from "../helpers/mock-fetch.js";
 
-const config = loadConfig({});
+const config = parseConfig({});
 function tokens(seq: string[]): TokenProvider & { refreshes: number } {
   let i = 0;
   const tp = {
@@ -53,6 +53,12 @@ test("second 401 becomes an AuthError", async () => {
   const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", status: 401, text: "nope" }]);
   const client = createClient({ fetch, config, tokens: tokens(["AT1", "AT2"]) });
   await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => e instanceof AuthError && /skylight-mcp login/.test(e.message));
+});
+
+test("the relogin hint after a second 401 is configurable (the shared server names its own command)", async () => {
+  const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", status: 401, text: "nope" }]);
+  const client = createClient({ fetch, config, tokens: tokens(["AT1", "AT2"]), reloginHint: "The server owner needs to run `skylight-mcp remote login`." });
+  await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => e instanceof AuthError && e.message === "Skylight rejected the credentials after a refresh. The server owner needs to run `skylight-mcp remote login`.");
 });
 
 test("non-2xx becomes SkylightApiError with sanitized, truncated excerpt", async () => {

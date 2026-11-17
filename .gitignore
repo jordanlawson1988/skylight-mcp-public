@@ -3,4 +3,9 @@ dist/
 *.log
 .DS_Store
 .superpowers/
+dist-worker/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
 .claude/

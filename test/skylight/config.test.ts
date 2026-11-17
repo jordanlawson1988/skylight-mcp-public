@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadConfig } from "../../src/skylight/config.js";
+import { loadConfig } from "../../src/node/config.js";
+import { CONFIG_ENV_KEYS, parseConfig } from "../../src/skylight/config.js";
 import { ValidationError } from "../../src/skylight/errors.js";
 import { TOOLSETS } from "../../src/skylight/vocab.js";
 
@@ -52,4 +53,22 @@ test("SKYLIGHT_TOOLSETS rejects unknown names, naming them and the valid choices
   assert.throws(() => loadConfig({ SKYLIGHT_TOOLSETS: "chores,bogus" }), (e: unknown) => e instanceof ValidationError && e.field === "SKYLIGHT_TOOLSETS" && /"bogus"/.test(e.message) && /meals/.test(e.message));
   assert.throws(() => loadConfig({ SKYLIGHT_TOOLSETS: "chores,nope,worse" }), (e: unknown) => e instanceof ValidationError && /"nope"/.test(e.message) && /"worse"/.test(e.message));
   assert.throws(() => loadConfig({ SKYLIGHT_TOOLSETS: " , " }), (e: unknown) => e instanceof ValidationError && e.field === "SKYLIGHT_TOOLSETS");
+});
+
+test("parseConfig is the pure core: same settings as loadConfig, no credentialsDir, unrelated keys ignored", () => {
+  const env = { SKYLIGHT_TIMEZONE: "America/Chicago", SKYLIGHT_TOOLSETS: "chores", SKYLIGHT_FRAME_ID: "42", SKYLIGHT_TOKEN_KEY: "not a setting", OTHER: "x" };
+  const pure = parseConfig(env);
+  assert.equal("credentialsDir" in pure, false);
+  assert.equal(pure.timezone, "America/Chicago");
+  assert.equal(pure.frameId, "42");
+  assert.deepEqual([...pure.toolsets], ["chores"]);
+  const { credentialsDir, ...node } = loadConfig(env);
+  assert.ok(credentialsDir.length > 0);
+  assert.deepEqual(node, pure);
+});
+
+test("CONFIG_ENV_KEYS lists exactly the variables parseConfig reads", () => {
+  assert.deepEqual([...CONFIG_ENV_KEYS].sort(), ["SKYLIGHT_API_BASE", "SKYLIGHT_FRAME_ID", "SKYLIGHT_REQUEST_TIMEOUT_MS", "SKYLIGHT_TIMEZONE", "SKYLIGHT_TOOLSETS"]);
+  assert.throws(() => parseConfig({ SKYLIGHT_REQUEST_TIMEOUT_MS: "0" }), ValidationError);
+  assert.throws(() => parseConfig({ SKYLIGHT_API_BASE: "ftp://x" }), ValidationError);
 });

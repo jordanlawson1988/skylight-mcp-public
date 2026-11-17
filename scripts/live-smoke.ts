@@ -38,7 +38,7 @@ async function main() {
     if (!mapped || mapped.cost !== pv) throw new Error(`reward ${String(raw.id)} has point_value ${pv} but the mapper returned cost ${String(mapped?.cost)}`);
   }
   if (process.env.SKYLIGHT_LIVE_WRITE !== "1") { console.log("read-only smoke OK (set SKYLIGHT_LIVE_WRITE=1 for write checks)"); return; }
-  const profile = profiles.find((p) => p.name === "Jordan") ?? profiles[0];
+  const profile = profiles.find((p) => p.name === process.env.SKYLIGHT_SMOKE_PROFILE) ?? profiles[0];
   if (!profile) throw new Error("no profile to assign to");
   console.log("using profile", `${profile.name}:${profile.id}`);
   await writeSmoke(rt, frameId, profile.id, today);

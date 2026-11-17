@@ -2,13 +2,24 @@
 
 ## What it is
 
-skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists, calendar events, the meal plan and recipes, photos and albums, devices, frame settings and sharing on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API.
+skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists, calendar events, the meal plan and recipes, photos and albums, devices, frame settings and sharing on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API. The same tools can also run as a shared server on Cloudflare Workers for Claude and ChatGPT on any device (see "Use from Claude and ChatGPT on any device").
 
-This is an unofficial project. It is not affiliated with or endorsed by Skylight. It uses Skylight's private API, which is undocumented and can change or break at any time without notice. It runs on macOS only, because the login credential is stored with the macOS Keychain.
+It runs on macOS only, because the login credential is stored with the macOS Keychain and the sign-in step reads Google Chrome's history.
+
+## Use at your own risk
+
+This is an unofficial project. It is not affiliated with, endorsed by or supported by Skylight.
+
+- It uses Skylight's private API, which is undocumented. Skylight can change or block it at any time without notice, and every tool here can stop working the same day.
+- Using a private API this way may be against Skylight's terms of service. Skylight could suspend or close an account that uses it. Read their terms and decide for yourself.
+- The tools change real family data. Deleting events, chores, lists, recipes, profiles and photos is permanent, and deleted photos are gone for everyone who shares the frame. The confirm gates reduce accidents; they do not undo them.
+- An AI assistant decides which tools to call. It can misread a request and change the wrong thing. Review what it proposes before you approve it.
+- You run it yourself. There is no hosted service: the Mac server runs on your Mac, and the shared server runs in your own Cloudflare account with your own Google sign-in client. You are responsible for its secrets, its costs and who you let in.
+- There is no support and no promise of fixes. The software is provided as is, with no warranty of any kind, under the MIT licence (see `LICENSE`).
 
 ## Safety
 
-- The tool set is deliberate, not complete. Changed 2026-10-12 at Jordan's request: profiles (Skylight categories) can be created, updated and deleted; rewards, lists and calendar events (phase 2) can be created, changed and deleted; and phase 3 adds the meal plan and recipes, photos and albums, devices, frame settings and sharing, and the plan and marketing flag. Every destructive action is confirm-gated. Never exposed: account delete or export, email or password change, frame transfer, alarms and sleep schedules, device config, renaming or hiding the frame, push-notification preferences, and who can see the family's photos (`open_to_public` and `message_viewability`: their values are unverified and a wrong one could publish photos).
+- The tool set is deliberate, not complete. Profiles (Skylight categories) can be created, updated and deleted; rewards, lists and calendar events (phase 2) can be created, changed and deleted; and phase 3 adds the meal plan and recipes, photos and albums, devices, frame settings and sharing, and the plan and marketing flag. Every destructive action is confirm-gated. Never exposed: account delete or export, email or password change, frame transfer, alarms and sleep schedules, device config, renaming or hiding the frame, push-notification preferences, and who can see the family's photos (`open_to_public` and `message_viewability`: their values are unverified and a wrong one could publish photos).
 - Photo files and links (`asset_url`, `thumbnail_url`), share links, the frame's notification email and the account's email, phone, birthday and name are never returned by any tool. `skylight_list_photos` returns ids, dates, captions and who sent each photo, nothing that opens the file. `from` is `"you"` for photos the frame owner sent (the owner's own email is never returned) and the sender's email for everyone else, which is how Skylight identifies people outside the household; if the owner cannot be identified, `from` is null.
 - Deleting photos is permanent and removes them for everyone who shares the frame. `skylight_delete_photos` needs `confirm: true`; its preview lists each photo's date and caption and refuses ids that are not on the frame. Deleting an album keeps its photos on the frame.
 - Resetting or removing a device is the most disruptive thing the server can do (a reset wipes the screen; a removed device leaves the frame). `skylight_reset_device` and `skylight_remove_device` need BOTH `confirm: true` and `confirmName`, the device's exact current name (case-sensitive); anything less returns a preview and changes nothing, and a wrong name is refused with the expected one.
@@ -20,6 +31,7 @@ This is an unofficial project. It is not affiliated with or endorsed by Skylight
 - Deleting a profile works the same way: `skylight_delete_profile` needs `confirm: true`, and its preview shows the upcoming chore count and where chores and events would go. To retire a person without losing their events, use `skylight_update_profile` with `kind: "label"` (Skylight's "Convert to Label").
 - Bulk create validates every item before sending any request, supports `dryRun: true`, and stops early if Skylight rejects the login or rate limits the requests.
 - Tokens are stored encrypted with AES-256-GCM. The encryption key lives in the macOS Keychain. Any process running as your user can read that key through `/usr/bin/security` without a prompt, so the encryption protects backups and the file at rest, not against malware on the Mac.
+- On the shared server (Claude, ChatGPT and Gemini over the internet), every call of a tool that can change something is logged with the family member who made it (ids only, 90 days); see "Use from Claude, ChatGPT and Gemini on any device".
 - Tokens, codes and keys are never written to logs and never returned in tool results. `status` and `doctor` print no token values.
 - The OAuth token Skylight issues has full-account scope. The tool layer here is narrow, but the token itself is not. Treat the stored credential as sensitive, and run `skylight-mcp logout` to remove it.
 
@@ -73,6 +85,54 @@ skylight-mcp doctor
 ```
 
 If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` block of that entry. `doctor` includes it when it is set in your environment, and does the same for `SKYLIGHT_TIMEZONE` and `SKYLIGHT_TOOLSETS`.
+
+## Use from Claude, ChatGPT and Gemini on any device
+
+The same tools can also run as a shared server, so the family can use them from Claude (web, Desktop, iPhone), ChatGPT Business and Gemini (web and phone), each signed in as themselves, on the family's one Skylight frame. It is a Cloudflare Worker (free tier): Claude, ChatGPT and Gemini connect to it over OAuth, family members sign in with Google, and only the emails on the family list get in. The server holds its own Skylight sign-in (Skylight rotates refresh tokens, so it never shares the Mac's), encrypted in a Durable Object, and logs every change with the family member who made it. The Mac setup above keeps working unchanged.
+
+Run these from your clone of this repository (the commands use its `wrangler.jsonc`). Do staging first, try it, then repeat with `--env production` and `npm run remote:deploy:production`.
+
+1. Sign in to Cloudflare: `npx wrangler login`.
+2. Deploy once to get the address: `npm run remote:deploy:staging`. It prints `https://skylight-mcp-staging.<your-subdomain>.workers.dev` (production: `https://skylight-mcp.<your-subdomain>.workers.dev`). The KV namespace is created on this first deploy.
+3. Create the server's two internal secrets: `skylight-mcp remote setup --env staging --url https://skylight-mcp-staging.<your-subdomain>.workers.dev`. It saves the address in `~/Library/Application Support/skylight-mcp/remote.json`, generates `SKYLIGHT_TOKEN_KEY` (encrypts the stored Skylight sign-in) and `ADMIN_TOKEN` (for the commands below), uploads both with `wrangler secret put` and keeps the admin token in your Keychain. Neither is printed or written to a file. Running setup again replaces both, after which you run `remote login` again.
+4. Create a Google sign-in client: Google Cloud console > APIs & Services > Credentials > Create credentials > OAuth client ID > Web application. Authorized redirect URIs: `https://skylight-mcp-staging.<your-subdomain>.workers.dev/callback` and `https://skylight-mcp.<your-subdomain>.workers.dev/callback`. If the OAuth consent screen is in Testing, add both family emails as test users.
+5. Give the Worker the Google client and the family list (each command asks for the value; the CLI never sees the Google secret):
+
+   ```sh
+   npx wrangler secret put GOOGLE_CLIENT_ID --env staging
+   npx wrangler secret put GOOGLE_CLIENT_SECRET --env staging
+   npx wrangler secret put ALLOWED_EMAILS --env staging   # comma-separated, e.g. you@gmail.com,spouse@example.com
+   ```
+
+6. Sign the server in to Skylight: `skylight-mcp remote login --env staging`. It is the same Chrome sign-in as `skylight-mcp login`, but the result goes to the server, not to this Mac's store. `skylight-mcp remote status --env staging` shows the server's sign-in.
+7. Claude (web, Desktop and iPhone share connectors): Customize > Connectors > Add custom connector, URL `https://skylight-mcp-staging.<your-subdomain>.workers.dev/mcp`. Leave the OAuth client fields empty; Claude registers itself. Connect, approve the consent page, then choose your Google account. Claude Free allows one custom connector.
+8. ChatGPT Business: the workspace owner turns on Developer mode for apps in the workspace settings; then, in ChatGPT, Settings > Apps, add a custom MCP server with the same `/mcp` URL and OAuth authentication. If the workspace belongs to an employer, its policy or admin may not allow a personal connector.
+9. Gemini (personal Google account, 18 or older, in the US, English): on gemini.google.com, Settings > Connected Apps (or Personal Intelligence > Connected Apps) > Custom apps, add the same `/mcp` URL. Gemini registers itself, so leave Advanced features empty. Connect, approve the consent page, then choose your Google account. Custom apps can only be added on the web, then they work in the Gemini phone apps too. Gemini requires Keep Activity to be on, so those chats (with family calendar, chore and photo details) are saved to the Google account.
+
+What the sign-in shows: a consent page that names the app by where access will be sent (Claude, ChatGPT, Gemini, or Claude Code on this computer), never by the name the app gives itself; says "This connects to the family Skylight" (or "the Rivera family Skylight" if you set `SKYLIGHT_FAMILY_NAME` to `Rivera`); and warns "Only continue if you just started connecting from Claude, ChatGPT or Gemini." Then comes Google's account chooser. A Google account that is not on `ALLOWED_EMAILS` gets "This Google account is not on the family list." and no access. The list is checked again on every call, so removing an email takes effect immediately. Emails must be plain ASCII (look-alike characters are refused). The first successful sign-in for each email also records that Google account's permanent id; a different Google account presenting the same email later is refused the same way. An app's connection lasts up to 30 days, then it asks you to connect again.
+
+If a family member's address is a Google Workspace account (an employer's or a school's, not plain Gmail), that Workspace's administrators control the account and can sign in as that person, so they could reach the family Skylight too. Prefer personal Gmail addresses on `ALLOWED_EMAILS`.
+
+What is logged:
+
+- The activity log: every call of a tool that can change something records when, who (the Google email), which tool, the ids it touched, and whether it worked or was only a preview. No other argument values, no tokens. It keeps 90 days. Ask for it with `skylight_recent_activity`.
+- Cloudflare's logs: one line per request with method, path, status and duration. Request headers, bodies and query strings are not logged.
+
+To take access away:
+
+- One person: `skylight-mcp remote revoke <email> --env production` disconnects every app they connected and forgets which Google account that email was bound to (so their next sign-in binds again, for example after they change Google accounts); remove them from `ALLOWED_EMAILS` (`npx wrangler secret put ALLOWED_EMAILS --env production`) to keep them out.
+- If a server ever ran without the app allowlist (Claude, ChatGPT and Gemini redirect addresses only), clear out what it may have handed to other apps: start with a fresh `OAUTH_KV` namespace, or run `skylight-mcp remote revoke <email>` for each family member. Apps registered back then can no longer get new access, because `/authorize` re-checks every redirect address.
+- The server's Skylight access: `skylight-mcp remote logout --env production` (asks first). Tools then answer that the server owner needs to run `skylight-mcp remote login`.
+
+Limits and notes:
+
+- The same confirm gates, previews and tool annotations apply, and Claude, ChatGPT and Gemini add their own approval prompts for tools that change things. ChatGPT sometimes blocks write calls with its own safety checks, and whether ChatGPT's phone app can use custom connectors is up to OpenAI.
+- 300 calls per person every 10 minutes; past that the server answers 429. The sign-in endpoints are also limited per client address per minute (an IPv4 address, or an IPv6 /64): `/register` 5, `/authorize` and `/callback` 20 each, `/token` 60; and `/register` has one shared budget of 20 a minute across all addresses.
+- Only Claude, ChatGPT and Gemini can connect: app registration accepts only their redirect addresses (`claude.ai` and `claude.com` `/api/mcp/auth_callback`, ChatGPT's connector callbacks, Gemini custom apps' `https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-<id>` (not the rest of that Google host, which other Google products share), and `http://localhost:<port>/callback` for Claude Code), and metadata-document clients must come from claude.ai, claude.com, chatgpt.com or openai.com. Anything else gets "This app cannot connect to the family Skylight."
+- Workers Free has a ceiling of about 1,000 KV writes a day, and an attacker can use it up on purpose: sign-ins, token refreshes and app registrations all write to KV. Once it is spent, sign-ins and token refreshes fail until it resets at midnight UTC. Run production on Workers Paid ($5 a month), which removes the ceiling; staging on Free is fine.
+- `SKYLIGHT_TOOLSETS` (a Worker var in `wrangler.jsonc`) trims the tool list per environment if a client struggles with many tools.
+- `SKYLIGHT_FAMILY_NAME` (optional) puts your family's name on the consent page. Add it to an environment's `vars` in `wrangler.jsonc`, or keep it out of the file with `npx wrangler secret put SKYLIGHT_FAMILY_NAME --env staging`.
+- The `workers.dev` address is public. Security rests on OAuth with a consent page per app, the Google allowlist and the admin token. Anyone with access to the Cloudflare account can read the Worker's secrets.
 
 ## Toolsets
 
@@ -128,7 +188,7 @@ By default the server registers every tool (more than sixty), which some assista
 | `skylight_delete_list_items` | Deletes 1-100 items in one request. Preview lists their titles unless `confirm: true`. |
 | `skylight_list_events` | Lists calendar events between two dates (default today through 7 days ahead, at most 92 days) with `source` and `editable`. Occurrences of a recurring event have ids like `123-1791803100`. Optional `profileId` filter. |
 | `skylight_create_event` | Creates an event. Timed events take `startsAt` as `2026-10-12T18:30`, read as Eastern time (or your `SKYLIGHT_TIMEZONE`) unless you add an offset such as `-04:00` or `Z`; the end defaults to one hour later. All-day events use `allDay: true` with `startDate` (and `endDate`). `profileIds` may be people or labels such as Birthdays. Optional `recurrence`, `timezone`, `location`, `description`, `emoji`, `countdown`. `invitedEmails` (up to 20) makes Skylight email an invitation to each address, so it needs `confirmInvites: true` (otherwise a preview). Results carry a human `when`. |
-| `skylight_update_event` | Changes fields on an event created in Skylight (the whole series for a recurring one, with `applyTo: "all"`). Accepts `invitedEmails` with `confirmInvites: true` like create (an empty list is ignored, it never removes invitees). Refuses events synced from Google or another calendar. |
+| `skylight_update_event` | Changes fields on an event created in Skylight (the whole series for a recurring one, with `applyTo: "all"`). A new time for a recurring series is given on any day it occurs and applies to every occurrence; the series keeps its days. Accepts `invitedEmails` with `confirmInvites: true` like create (an empty list is ignored, it never removes invitees). Refuses events synced from Google or another calendar. |
 | `skylight_delete_event` | Deletes an event. Preview unless `confirm: true`. `applyTo`: `one` or `future` need an occurrence id; `all`, or a plain id with no `applyTo`, deletes the whole series. Refuses synced events. |
 | `skylight_list_meal_categories` | Lists the meal slots (Breakfast, Lunch, Dinner, Snack) as `{ id, name, color, enabled, position }`. |
 | `skylight_update_meal_category` | Renames a meal slot, changes its `#RRGGBB` `color`, or turns it off or on (`enabled`). |
@@ -164,6 +224,7 @@ By default the server registers every tool (more than sixty), which some assista
 | `skylight_unblock_frame_user` | Gives a blocked person access again, or approves one who is waiting. |
 | `skylight_get_account` | The plan, subscriptions (`{ status, cadence, type }`) and marketing-email flag. No email, phone, birthday or name. |
 | `skylight_set_marketing_emails` | Turns Skylight's marketing emails on or off. |
+| `skylight_recent_activity` | Shared server only: the latest changes made through it (when, who, tool, ids, ok or preview), newest first; `limit` 1 to 50, default 20. |
 
 ## Example prompts
 
@@ -202,9 +263,12 @@ Skylight stores and returns UTC. skylight-mcp shows you everything in one zone, 
 Use `skylight-mcp ...` as above, or `node dist/cli.js ...` without linking.
 
 ```sh
-npm run check        # typecheck, tests and build
+npm run check        # typecheck (Mac, tests, Worker), tests, build, and the Worker's dry-run bundle
+npm run remote:dev   # the shared server locally (wrangler dev; put dummy secrets in .dev.vars)
 npm run live:smoke   # opt-in checks against the real API
 ```
+
+Dependencies are pinned to exact versions, normally ones published at least 14 days earlier. One exception: `wrangler` is 4.149.0 (published 2026-10-08), with `@cloudflare/workers-types` 5.20261006.1 to match its workerd 1.20261006. 4.149.0 is the oldest wrangler without high-severity `npm audit` advisories (checked 2026-10-12): npm lists wrangler up to 4.148.0 as affected through miniflare, 4.142.0 reported high advisories in `undici` (7.0 to 7.29) and `sharp` (below 0.35.5), and 4.148.0 still reported the `sharp` one. Both tools are development-only; neither is in the deployed Worker.
 
 `npm run live:smoke` uses your stored login and is read-only by default. Set `SKYLIGHT_LIVE_WRITE=1` to also create, update, complete, revert and delete a one-time chore and a daily recurring chore (including deleting a single occurrence and the whole series), the weekly, monthly, interval and until recurrences, a morning routine step (complete, revert, delete as a whole), an up-for-grabs chore, and a field-clearing update. It then runs the phase 2 leg (`scripts/live-smoke-phase2.ts`) on a dedicated smoke profile: rewards (create, update, redeem preview, redeem, unredeem, delete), reordering two routine steps, a list with items (add, complete, rename, move, bulk delete), and calendar events (all-day, timed with offset, weekly recurrence with one occurrence and the series deleted, and the refusal of a synced event when one exists). After that comes the phase 3 leg (`scripts/live-smoke-phase3.ts`): a recipe with two `zzsmoke` ingredients (parsed back), a one-time and a daily meal, `applyTo` one (a new `mealId` appears), delete one date and the rest of the series, adding the recipe to the grocery list and waiting up to 15 seconds for the two items (then deleting them), deleting the recipe together with its planned meal, an album (create, rename, add and remove the newest photo, delete), setting and restoring the newest photo's caption, flipping and restoring a device's `showHeart`, and a no-op frame time-zone update. The smoke never resets or removes a device, deletes photos, invites or blocks anyone, or changes marketing emails. Everything it creates is prefixed `[skylight-mcp smoke]`, cleaned up in a `finally` block and checked for leftovers. It is not part of the automated tests. Other scripts: `npm run dev:server` and `npm run dev:cli` run the TypeScript sources directly. API notes are in `docs/api.md`.
 

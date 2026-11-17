@@ -1,4 +1,5 @@
-const SECRET_KEYS = ["access_token", "refresh_token", "code", "code_verifier"];
+/** JSON keys whose string values are always masked: Skylight OAuth fields, plus the shared server's Google and admin secrets. */
+const SECRET_KEYS = ["access_token", "refresh_token", "code", "code_verifier", "client_secret", "id_token", "admin_token"];
 const JSON_SECRET_VALUES = SECRET_KEYS.map((k) => new RegExp(`("${k}"\\s*:\\s*)"[^"]*"`, "g"));
 const BEARER = /Bearer\s+[A-Za-z0-9._~+/=-]+/g;
 

@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { buildEventCreateBody, buildEventUpdateBody, MAX_EVENT_INVITEES, MAX_EVENT_TITLE_LENGTH, MAX_LOCATION_LENGTH, type EventFields } from "../skylight/event-payload.js";
+import { addHoursKeepingOffset, buildEventCreateBody, buildEventUpdateBody, MAX_EVENT_INVITEES, MAX_EVENT_TITLE_LENGTH, MAX_LOCATION_LENGTH, type EventFields, type EventUpdateBody } from "../skylight/event-payload.js";
 import { SkylightApiError, ValidationError } from "../skylight/errors.js";
 import { assertDate, assertId, parseEventId, type EventRef } from "../skylight/ids.js";
 import { mapEvent, mapEvents, type CalendarEvent } from "../skylight/types.js";
 import { addDays, exclusiveDateMax, formatHuman, formatHumanTime, formatOffsetDateTime, parseInstant, todayIn, zoneLabel } from "../skylight/time.js";
-import { EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, OWN_EVENT_SOURCE } from "../skylight/vocab.js";
+import { APPLY_TO_ALL, EXPOSED_APPLY_TO_VALUES, EXPOSED_UPDATE_APPLY_TO_VALUES, OWN_EVENT_SOURCE } from "../skylight/vocab.js";
 import type { ToolContext } from "./context.js";
 import { recurrenceShape } from "./chores.js";
 import { assertProfilesExist } from "./profiles.js";
@@ -14,6 +14,7 @@ import { ANNOTATIONS, run } from "./result.js";
 /** Longest window skylight_list_events returns, in days between after and before. */
 export const MAX_EVENT_SPAN_DAYS = 92;
 const LOOKUP_DAYS = 365;
+const HOUR_MS = 3_600_000;
 
 const eventsPath = (frameId: string) => `/api/frames/${frameId}/calendar_events`;
 const dataOf = (json: unknown): unknown => (json as { data?: unknown } | null)?.data;
@@ -48,6 +49,27 @@ async function lookupEvent(ctx: ToolContext, frameId: string, ref: EventRef, id:
     if (e instanceof SkylightApiError) throw new ValidationError("eventId", "could not verify whether this event comes from a synced calendar; try again");
     throw e;
   }
+}
+
+/**
+ * Where a new time for a recurring series must be sent. Skylight moves the whole series by (new start - start of the occurrence named in the
+ * path), so the path must name a real occurrence `<masterId>-<unixSeconds>`, as the web app does: with the bare master id Skylight reads the id
+ * itself as the occurrence's unix seconds (13717574259 is the year 2404) and moved a live series to 1648, at an odd time of day [live 2026-10-16].
+ * The occurrence used is the one on the day of the new start, so only the time of day changes; the series keeps its days (recurrence moves those).
+ * Fills in ends_at (same length as now) because only start-and-end on the occurrence's day was verified. Returns the occurrence id.
+ */
+async function seriesOccurrenceForTimes(ctx: ToolContext, frameId: string, masterId: string, body: EventUpdateBody, tz: string): Promise<string> {
+  if (body.all_day === true) throw new ValidationError("startDate", "cannot move the days of a recurring all-day series; change recurrence instead, or delete the series and create it again");
+  if (body.starts_at === undefined) throw new ValidationError("startsAt", "is needed to change the times of a recurring series: give startsAt (on a day the series occurs) with endsAt");
+  const day = formatOffsetDateTime(body.starts_at, tz).slice(0, 10);
+  const events = mapEvents(await ctx.client.request({ method: "GET", path: eventsPath(frameId), query: { date_min: addDays(day, -1), date_max: exclusiveDateMax(addDays(day, 1)) } }));
+  const occurrence = events.find((e) => e.masterId === masterId && e.id !== masterId && presentEvent(e, tz).startsAt?.slice(0, 10) === day);
+  if (!occurrence) throw new ValidationError("startsAt", `must be on a day this recurring series occurs (it has no occurrence on ${day}); the new time then applies to every occurrence`);
+  if (body.ends_at === undefined) {
+    const length = occurrence.allDay || occurrence.startsAt === null || occurrence.endsAt === null ? HOUR_MS : parseInstant(occurrence.endsAt) - parseInstant(occurrence.startsAt);
+    body.ends_at = addHoursKeepingOffset(body.starts_at, length / HOUR_MS);
+  }
+  return occurrence.id;
 }
 
 /** Events synced from another calendar (Google etc.) belong to that calendar; Skylight would only fight the sync. */
@@ -177,7 +199,7 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
     "skylight_update_event",
     {
       title: "Update a calendar event",
-      description: `Change fields on an event created in Skylight. Only the provided fields change. Datetimes are read as ${zoneLabel(tz)} unless you add an explicit offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited, and an occurrence id with no applyTo still updates the whole series through its master id. Events synced from Google or another calendar are refused: change them there. ${INVITE_NOTE}`,
+      description: `Change fields on an event created in Skylight. Only the provided fields change. Datetimes are read as ${zoneLabel(tz)} unless you add an explicit offset, as for skylight_create_event. For a recurring event the whole series changes (pass applyTo: \"all\"); a single occurrence cannot be edited, and an occurrence id with no applyTo still updates the whole series through its master id. To change a recurring series' time, give startsAt (and endsAt) on any day the series occurs, such as its next occurrence: every occurrence moves to that time of day and the series keeps its days (change recurrence to move it to other days). endsAt defaults to the current length. The days of a recurring all-day series cannot be changed here. Events synced from Google or another calendar are refused: change them there. ${INVITE_NOTE}`,
       inputSchema: {
         eventId: eventIdSchema,
         title: z.string().optional().describe(`New title, up to ${MAX_EVENT_TITLE_LENGTH} characters.`),
@@ -196,9 +218,15 @@ export function registerCalendarTools(server: McpServer, ctx: ToolContext): void
       if (applyTo !== undefined) body.apply_to = applyTo;
       const frameId = await ctx.frames.resolve();
       if (Array.isArray(body.category_ids)) await assertProfilesExist(ctx, frameId, body.category_ids as string[], "profileIds");
-      assertOwnEvent(await lookupEvent(ctx, frameId, ref, eventId));
+      const found = await lookupEvent(ctx, frameId, ref, eventId);
+      assertOwnEvent(found);
+      let pathId = ref.masterId;
+      if ((ref.occurrence !== null || found?.recurring === true) && (built.starts_at !== undefined || built.ends_at !== undefined)) {
+        pathId = await seriesOccurrenceForTimes(ctx, frameId, ref.masterId, built, tz);
+        body.apply_to = APPLY_TO_ALL;
+      }
       if (invited.length > 0 && confirmInvites !== true) return invitePreview(invited, "changed", { eventId });
-      const json = await ctx.client.request<unknown>({ method: "PUT", path: `${eventsPath(frameId)}/${ref.masterId}`, body });
+      const json = await ctx.client.request<unknown>({ method: "PUT", path: `${eventsPath(frameId)}/${pathId}`, body });
       const updated = eventsFrom(json)[0];
       return updated ? presentEvent(updated, tz) : { id: ref.masterId, updated: true };
     })
