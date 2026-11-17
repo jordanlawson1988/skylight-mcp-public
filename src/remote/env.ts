@@ -18,6 +18,14 @@ export interface RemoteEnv {
   SKYLIGHT_FRAME_ID?: string;
   SKYLIGHT_TIMEZONE?: string;
   SKYLIGHT_TOOLSETS?: string;
+  /** Optional: the family's name for the consent page ("Rivera" gives "the Rivera family Skylight"). */
+  SKYLIGHT_FAMILY_NAME?: string;
+}
+
+/** How the consent page and OAuth metadata name this server's Skylight: "<name> family Skylight", or "family Skylight" with no name. */
+export function familyLabel(name: string | undefined): string {
+  const clean = (name ?? "").trim().replace(/\s+/g, " ").slice(0, 40);
+  return clean ? `${clean} family Skylight` : "family Skylight";
 }
 
 /** The SkylightAccount Durable Object's one instance: the whole family shares a single Skylight account. */
@@ -29,7 +37,7 @@ export const MCP_SCOPE = "skylight";
 /** Every secret the Worker needs, in the order `skylight-mcp remote setup` explains them. */
 export const REMOTE_SECRETS = ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ALLOWED_EMAILS"] as const;
 export type RemoteSecret = (typeof REMOTE_SECRETS)[number];
-/** The two the setup command generates and stores itself; Jordan supplies the Google ones and the allowlist. */
+/** The two the setup command generates and stores itself; the server owner supplies the Google ones and the allowlist. */
 export const GENERATED_SECRETS = ["SKYLIGHT_TOKEN_KEY", "ADMIN_TOKEN"] as const satisfies readonly RemoteSecret[];
 
 /** The tool settings (SKYLIGHT_* vars) as a SkylightConfig; bindings and secrets are ignored. */

@@ -57,8 +57,8 @@ test("second 401 becomes an AuthError", async () => {
 
 test("the relogin hint after a second 401 is configurable (the shared server names its own command)", async () => {
   const { fetch } = createMockFetch([{ method: "GET", path: "/api/x", status: 401, text: "nope" }]);
-  const client = createClient({ fetch, config, tokens: tokens(["AT1", "AT2"]), reloginHint: "Jordan needs to run `skylight-mcp remote login`." });
-  await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => e instanceof AuthError && e.message === "Skylight rejected the credentials after a refresh. Jordan needs to run `skylight-mcp remote login`.");
+  const client = createClient({ fetch, config, tokens: tokens(["AT1", "AT2"]), reloginHint: "The server owner needs to run `skylight-mcp remote login`." });
+  await assert.rejects(client.request({ method: "GET", path: "/api/x" }), (e: unknown) => e instanceof AuthError && e.message === "Skylight rejected the credentials after a refresh. The server owner needs to run `skylight-mcp remote login`.");
 });
 
 test("non-2xx becomes SkylightApiError with sanitized, truncated excerpt", async () => {

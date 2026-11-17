@@ -54,8 +54,8 @@ export const AUDIT_MAX_ENTRIES = 5000;
 export { REMOTE_LOGIN_COMMAND };
 
 export const ACCOUNT_MESSAGES = {
-  notSignedIn: "The shared server is not signed in to Skylight. Jordan needs to run `skylight-mcp remote login`.",
-  expired: "Skylight sign-in for the shared server expired; Jordan needs to run `skylight-mcp remote login`.",
+  notSignedIn: "The shared server is not signed in to Skylight. The server owner needs to run `skylight-mcp remote login`.",
+  expired: "Skylight sign-in for the shared server expired; the server owner needs to run `skylight-mcp remote login`.",
   undecryptable: "The stored Skylight credential cannot be decrypted; run `skylight-mcp remote login`.",
   badKey: "SKYLIGHT_TOKEN_KEY must be 32 random bytes, base64-encoded.",
 } as const;

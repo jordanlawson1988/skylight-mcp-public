@@ -67,10 +67,10 @@ const defaultHandler: ExportedHandler<Env> = {
  */
 const providers = new Map<string, OAuthProvider<Env>>();
 
-function providerFor(origin: string): OAuthProvider<Env> {
+function providerFor(origin: string, familyName?: string): OAuthProvider<Env> {
   let provider = providers.get(origin);
   if (!provider) {
-    provider = new OAuthProvider<Env>({ apiRoute: "/mcp", apiHandler, defaultHandler, ...providerPolicy(origin) });
+    provider = new OAuthProvider<Env>({ apiRoute: "/mcp", apiHandler, defaultHandler, ...providerPolicy(origin, familyName) });
     providers.set(origin, provider);
   }
   return provider;
@@ -89,7 +89,7 @@ export default {
         return refused;
       }
       // A shallow copy per request: the provider attaches OAUTH_PROVIDER to the env it is given.
-      const response = await providerFor(url.origin).fetch(request, { ...env } as Env, ctx);
+      const response = await providerFor(url.origin, env.SKYLIGHT_FAMILY_NAME).fetch(request, { ...env } as Env, ctx);
       status = response.status;
       return response;
     } catch (e) {

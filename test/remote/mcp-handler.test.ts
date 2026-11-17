@@ -113,7 +113,7 @@ test("skylight_auth_status reports the shared server's credential and the remote
   const s = r.data as Record<string, unknown>;
   assert.equal(s.loggedIn, true);
   assert.equal(s.frameId, "77");
-  assert.equal(s.loginHint, "Jordan needs to run `skylight-mcp remote login`");
+  assert.equal(s.loginHint, "The server owner needs to run `skylight-mcp remote login`");
   assert.ok(!r.text.includes("SKY-AT"));
 });
 
@@ -121,7 +121,7 @@ test("a signed-out shared server answers tools with who needs to sign in", async
   const { tool } = await setup([FRAMES], { signedIn: false });
   const r = await tool("skylight_list_lists");
   assert.equal(r.isError, true);
-  assert.match(r.text, /Jordan needs to run `skylight-mcp remote login`/);
+  assert.match(r.text, /The server owner needs to run `skylight-mcp remote login`/);
   const s = (await tool("skylight_auth_status")).data as Record<string, unknown>;
   assert.equal(s.loggedIn, false);
   assert.equal(s.needsLogin, true);
@@ -133,7 +133,7 @@ test("a Skylight refusal after refresh names the remote login command", async ()
   });
   const r = await tool("skylight_list_lists");
   assert.equal(r.isError, true);
-  assert.match(r.text, /Jordan needs to run `skylight-mcp remote login`/);
+  assert.match(r.text, /The server owner needs to run `skylight-mcp remote login`/);
   assert.doesNotMatch(r.text, /`skylight-mcp login`/);
 });
 

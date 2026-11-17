@@ -74,7 +74,7 @@ test("SKYLIGHT_TOKEN_KEY must decode to exactly 32 bytes", async () => {
 test("not signed in: getAccessToken explains who signs in, status reports logged out", async () => {
   const { core } = setup();
   await assert.rejects(core.getAccessToken(), (e: unknown) => e instanceof AuthError && e.message === ACCOUNT_MESSAGES.notSignedIn);
-  assert.match(ACCOUNT_MESSAGES.notSignedIn, /Jordan needs to run `skylight-mcp remote login`/);
+  assert.match(ACCOUNT_MESSAGES.notSignedIn, /The server owner needs to run `skylight-mcp remote login`/);
   assert.deepEqual(await core.status(), { loggedIn: false, needsLogin: true, tokenExpiresAt: null, credentialError: null });
 });
 
@@ -141,7 +141,7 @@ test("invalid_grant (400 or 401) marks needsLogin, keeps the credential and stop
     const { core, calls, storage } = setup([tokenRoute({ error: "invalid_grant" }, status)]);
     await core.setCredential(cred({ expiresAt: T0 - 1 }));
     await assert.rejects(core.getAccessToken(), (e: unknown) => e instanceof AuthError && e.message === ACCOUNT_MESSAGES.expired);
-    assert.equal(ACCOUNT_MESSAGES.expired, "Skylight sign-in for the shared server expired; Jordan needs to run `skylight-mcp remote login`.");
+    assert.equal(ACCOUNT_MESSAGES.expired, "Skylight sign-in for the shared server expired; the server owner needs to run `skylight-mcp remote login`.");
     assert.ok(storage.data.has("credential"), "the credential is not cleared");
     const s = await core.status();
     assert.equal(s.loggedIn, true);

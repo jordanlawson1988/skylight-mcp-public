@@ -26,7 +26,7 @@ export interface AuthStatusReport {
 /** The sign-in instruction for each way the tools run. */
 export const LOGIN_HINTS = {
   stdio: `run \`${DEFAULT_LOGIN_COMMAND}\` in a terminal on the Mac`,
-  remote: `Jordan needs to run \`${REMOTE_LOGIN_COMMAND}\``,
+  remote: `The server owner needs to run \`${REMOTE_LOGIN_COMMAND}\``,
 } as const;
 
 /** Frame errors that mean the credential itself is dead (so a new sign-in is the fix). */

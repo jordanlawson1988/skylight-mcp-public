@@ -85,7 +85,7 @@ test("the consent page shows the app, where access goes and the family Skylight,
   assert.ok(!html.includes("<img src=x"));
   assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
   assert.ok(html.includes("claude.ai"));
-  assert.ok(html.includes("This connects to the Lawson family Skylight"));
+  assert.ok(html.includes("This connects to the family Skylight."));
   assert.ok(html.includes(`value="h&quot;&gt;&lt;b&gt;"`));
   assert.match(html, /name="decision" value="approve"/);
   assert.match(html, /\(not verified\)\. It registered itself with this server\./);
@@ -93,6 +93,12 @@ test("the consent page shows the app, where access goes and the family Skylight,
   assert.match(cimd, /Its description is published by chatgpt\.com\./);
   const local = consentPage({ clientName: "CLI", clientId: "abc", redirectUri: "http://localhost:3334/callback", handle: "h" });
   assert.match(local, /Allow Claude Code on this computer to use the family Skylight/);
+});
+
+test("the consent page names the family when SKYLIGHT_FAMILY_NAME is set, escaped", () => {
+  const html = consentPage({ clientName: "Claude", clientId: "abc", redirectUri: "https://claude.ai/api/mcp/auth_callback", handle: "h", familyName: "Rivera <b>" });
+  assert.ok(html.includes("This connects to the Rivera &lt;b&gt; family Skylight."));
+  assert.ok(!html.includes("Rivera <b>"));
 });
 
 // ---- token exchange ----

@@ -1,6 +1,6 @@
 import { base64ToBytes, bytesToBase64Url, randomBytes } from "../skylight/encoding.js";
 import { pkceChallenge } from "../skylight/oauth.js";
-import { MCP_SCOPE, type RemoteEnv } from "./env.js";
+import { MCP_SCOPE, familyLabel, type RemoteEnv } from "./env.js";
 import { bindIdentity, isPlainEmail, type IdentityKv } from "./identity.js";
 import { appNameForRedirect, isAllowedCimdClientId, isAllowedRedirectUri, isCimdClientId } from "./redirects.js";
 
@@ -199,7 +199,7 @@ export const CONSENT_WARNING = "Only continue if you just started connecting fro
  * The consent page. The app is named from where access will be sent (appNameForRedirect), not from the name the client
  * registered, which anyone can choose; that name appears only in small print, marked unverified.
  */
-export function consentPage(o: { clientName: string; clientId: string; redirectUri: string; handle: string }): string {
+export function consentPage(o: { clientName: string; clientId: string; redirectUri: string; handle: string; familyName?: string | undefined }): string {
   const app = appNameForRedirect(o.redirectUri);
   const appHtml = escapeHtml(app);
   let redirectHost = "";
@@ -214,7 +214,7 @@ export function consentPage(o: { clientName: string; clientId: string; redirectU
   }
   return shell(`Allow ${app}?`, `
 <h1>Allow ${appHtml} to use the family Skylight?</h1>
-<p>This connects to the Lawson family Skylight. ${appHtml} will be able to read and change the family calendar, chores, lists, meals, photos and frame settings, as you.</p>
+<p>This connects to the ${escapeHtml(familyLabel(o.familyName))}. ${appHtml} will be able to read and change the family calendar, chores, lists, meals, photos and frame settings, as you.</p>
 <p><strong>${escapeHtml(CONSENT_WARNING)}</strong> If this page opened by itself or from a link someone sent you, press Cancel.</p>
 <p>Access will be sent to <strong>${escapeHtml(redirectHost)}</strong>.</p>
 <p class="muted">The app calls itself &quot;${escapeHtml(o.clientName)}&quot; (not verified). ${source}</p>
@@ -236,7 +236,7 @@ export interface GoogleDeps {
   identities: IdentityKv;
 }
 
-const NOT_SET_UP = "This server has not finished setting up Google sign-in. Jordan needs to add its Google settings.";
+const NOT_SET_UP = "This server has not finished setting up Google sign-in. The server owner needs to add its Google settings.";
 const START_AGAIN = "This sign-in page expired or was already used. Start connecting again from the app.";
 
 function googleSettings(env: RemoteEnv): { clientId: string; clientSecret: string; allowlist: string[] } | null {
@@ -308,7 +308,7 @@ export async function handleAuthorize(request: Request, deps: GoogleDeps): Promi
     const consent = await deps.oauth.beginConsent(authRequest);
     const headers = consent.headers;
     for (const [k, v] of Object.entries(PAGE_HEADERS)) headers.set(k, v);
-    const html = consentPage({ clientName: client.clientName ?? client.clientId, clientId: client.clientId, redirectUri: authRequest.redirectUri, handle: consent.handle });
+    const html = consentPage({ clientName: client.clientName ?? client.clientId, clientId: client.clientId, redirectUri: authRequest.redirectUri, handle: consent.handle, familyName: deps.env.SKYLIGHT_FAMILY_NAME });
     return new Response(html, { status: 200, headers });
   }
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { Allow: "GET, POST" } });
