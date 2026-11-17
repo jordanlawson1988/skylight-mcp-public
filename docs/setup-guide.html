@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up skylight-mcp, step by step</title>
+<!--
+  The same guide as docs/setup-guide.md, as one self-contained page: no network requests, no build step.
+  test/setup-guide.test.ts fails if a command or a step here and in the Markdown guide stop matching.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #faf9f6;
+    --panel: #ffffff;
+    --text: #1e2227;
+    --muted: #5d6570;
+    --line: #dedbd3;
+    --link: #0a58a6;
+    --code-bg: #f1efe9;
+    --note-bg: #f4f1e8;
+    --ok: #1f7a45;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --panel: #1b1e23;
+      --text: #e7e5e0;
+      --muted: #9ba3ad;
+      --line: #2f343b;
+      --link: #86bdf2;
+      --code-bg: #0e1013;
+      --note-bg: #1f2228;
+      --ok: #6cc58f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 var(--sans); }
+  a { color: var(--link); }
+  .page { max-width: 68rem; margin: 0 auto; padding: 1.5rem 1.25rem 5rem; }
+  main { min-width: 0; }
+
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1rem; }
+  h2 { font-size: 1.45rem; line-height: 1.25; margin: 3.5rem 0 1rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.15rem; line-height: 1.3; margin: 0 0 .75rem; }
+  h2, .step { scroll-margin-top: 1rem; }
+  .step { margin-top: 2.75rem; }
+  .step h3 .n { color: var(--muted); font-weight: 600; }
+  p, ul, ol { margin: 0 0 1rem; }
+  li { margin-bottom: .35rem; }
+  li > pre, li > .code, li > .stack { margin-top: .6rem; }
+
+  code { font-family: var(--mono); font-size: .88em; background: var(--code-bg); padding: .1em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+  pre { font-family: var(--mono); font-size: .86rem; line-height: 1.5; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: 0 0 1rem; overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  pre[data-copy] { white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre[data-copy] code { overflow-wrap: anywhere; }
+  pre.out { background: transparent; color: var(--muted); }
+  .code { position: relative; margin: 0 0 1rem; }
+  .code pre { margin: 0; padding-right: 5.25rem; }
+  .copy { position: absolute; top: .4rem; right: .4rem; font: 500 .8rem/1 var(--sans); padding: .4rem .65rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+  .copy:hover { border-color: var(--muted); }
+  .stack { margin: 0 0 1rem; }
+  .stack pre, .stack .code { margin-bottom: .4rem; }
+  .sub.filled { color: var(--link); }
+
+  .note { background: var(--note-bg); border: 1px solid var(--line); border-radius: 8px; padding: .85rem 1rem; }
+  .done { display: inline-flex; align-items: center; gap: .55rem; margin-top: .25rem; color: var(--muted); font-size: .95rem; cursor: pointer; }
+  .done input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--ok); }
+
+  .fill { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; margin: 0 0 1rem; }
+  .fill label { display: block; font-weight: 600; margin-bottom: .4rem; }
+  .fill input { width: 100%; max-width: 24rem; font: inherit; font-family: var(--mono); font-size: .95rem; padding: .5rem .65rem; border: 1px solid var(--muted); border-radius: 6px; background: var(--bg); color: var(--text); }
+  .fill .hint { margin: .5rem 0 0; color: var(--muted); font-size: .92rem; min-height: 3.2em; }
+  .needs-js { display: none; }
+  .js .needs-js { display: block; }
+  .js button.needs-js { display: inline-block; }
+
+  table { width: 100%; border-collapse: collapse; margin: 0 0 1.25rem; font-size: .95rem; }
+  th, td { text-align: left; vertical-align: top; padding: .65rem .75rem .65rem 0; border-top: 1px solid var(--line); }
+  th { border-top: 0; color: var(--muted); font-weight: 600; }
+  td:first-child, th:first-child { width: 42%; }
+
+  nav { font-size: .92rem; margin-bottom: 2rem; }
+  nav summary { cursor: pointer; font-weight: 600; padding: .5rem 0; }
+  nav ol { list-style: none; margin: 0; padding: 0; }
+  nav li { margin: 0; }
+  nav a { display: block; padding: .22rem 0; color: var(--text); text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  nav .part > a { font-weight: 600; margin-top: .9rem; }
+  nav .part ol a { padding-left: .9rem; color: var(--muted); }
+  nav a.is-done::after { content: " \2713"; color: var(--ok); }
+  nav .progress { margin: .1rem 0 .3rem .9rem; color: var(--muted); font-size: .85rem; }
+  nav .after { margin-top: .9rem; }
+  #reset { margin-top: 1rem; font: inherit; font-size: .85rem; padding: .3rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+
+  @media (min-width: 62rem) {
+    .page { display: grid; grid-template-columns: 15rem minmax(0, 44rem); gap: 3.5rem; padding-top: 2.5rem; }
+    nav { position: sticky; top: 1.5rem; align-self: start; max-height: calc(100vh - 3rem); overflow-y: auto; margin-bottom: 0; }
+    nav summary { display: none; }
+  }
+  @media (max-width: 40rem) {
+    body { font-size: 16px; }
+    h1 { font-size: 1.65rem; }
+    table, tbody, tr, td { display: block; width: 100%; }
+    thead { display: none; }
+    tr { border-top: 1px solid var(--line); padding: .7rem 0; }
+    td { border: 0; padding: 0; }
+    td:first-child { width: 100%; font-weight: 600; margin-bottom: .3rem; }
+  }
+  @media print {
+    nav, .copy, .fill, .done, #reset { display: none !important; }
+    .page { display: block; max-width: none; }
+    pre { white-space: pre-wrap; }
+    a { color: inherit; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<nav aria-label="Contents">
+  <details id="toc" open>
+    <summary>Contents</summary>
+    <ol>
+      <li><a href="#before-you-start">Before you start</a></li>
+      <li class="part"><a href="#part-1">Part 1. Your Mac and Claude Desktop</a>
+        <p class="progress needs-js" data-progress="1"></p>
+        <ol>
+          <li><a href="#step-1">1. Download the code</a></li>
+          <li><a href="#step-2">2. Install and build</a></li>
+          <li><a href="#step-3">3. The skylight-mcp command</a></li>
+          <li><a href="#step-4">4. Sign in to Skylight</a></li>
+          <li><a href="#step-5">5. Run the setup check</a></li>
+          <li><a href="#step-6">6. Add it to Claude Desktop</a></li>
+          <li><a href="#step-7">7. Ask Claude</a></li>
+        </ol>
+      </li>
+      <li class="part"><a href="#part-2">Part 2. A shared server (optional)</a>
+        <p class="progress needs-js" data-progress="2"></p>
+        <ol>
+          <li><a href="#step-8">8. Sign in to Cloudflare</a></li>
+          <li><a href="#step-9">9. Deploy the server</a></li>
+          <li><a href="#step-10">10. The server's secrets</a></li>
+          <li><a href="#step-11">11. Google sign-in client</a></li>
+          <li><a href="#step-12">12. Google client and family list</a></li>
+          <li><a href="#step-13">13. Sign the server in</a></li>
+          <li><a href="#step-14">14. Connect the assistants</a></li>
+          <li><a href="#step-15">15. Move to production</a></li>
+        </ol>
+      </li>
+      <li class="after"><a href="#family">Add or remove a family member</a></li>
+      <li><a href="#update">Update to a newer version</a></li>
+      <li><a href="#troubleshooting">When something goes wrong</a></li>
+      <li><a href="#remove">Remove it</a></li>
+    </ol>
+    <button type="button" id="reset" class="needs-js">Clear the checklist</button>
+  </details>
+</nav>
+
+<main>
+<h1>Set up skylight-mcp, step by step</h1>
+
+<p>This guide takes you from nothing to an AI assistant that can read and change your Skylight Calendar. It starts with <code>git clone</code> and shows what each command prints when it works, so you can tell early when something is off.</p>
+
+<p>There are two parts. Part 1 puts the server on your Mac for Claude Desktop and takes about 15 minutes. Part 2 is optional. It puts a shared server in your own Cloudflare account so the rest of the family can use Claude, ChatGPT or Gemini from any device. Allow about an hour for that one, most of it spent in the Cloudflare and Google consoles.</p>
+
+<p>Tick the box at the end of each step as you go. This page remembers your place in this browser, so you can close it and come back. The same guide is in the repository as plain text: <code>docs/setup-guide.md</code>.</p>
+
+<p class="note">Read <a href="https://github.com/jordanlawson1988/skylight-mcp-public#use-at-your-own-risk">Use at your own risk</a> before you start. skylight-mcp is unofficial and not affiliated with Skylight. It uses Skylight's private API, which can break or be blocked at any time, and using it may be against Skylight's terms of service. Its tools change real family data, and deletes are permanent. There is no support and no warranty.</p>
+
+<h2 id="before-you-start">Before you start</h2>
+
+<p>You need all of these for Part 1:</p>
+<ul>
+  <li>A Mac. The server does not run on Windows or Linux.</li>
+  <li>A Skylight Calendar, and the email and password you use in the Skylight app.</li>
+  <li>Google Chrome. The sign-in step reads its result from Chrome's history.</li>
+  <li>Claude Desktop, installed and signed in.</li>
+  <li>Node.js 20 or newer.</li>
+  <li>Git.</li>
+</ul>
+
+<p>Open Terminal (press Command-Space, type <code>Terminal</code>, press Return) and check the last two:</p>
+
+<pre data-copy><code>node --version
+git --version</code></pre>
+
+<p>Node should print <code>v20</code> or higher. If the command is not found, install the LTS version from nodejs.org, then close Terminal and open it again. If <code>git</code> is missing, macOS offers to install the Command Line Tools the first time you run it. Accept, wait for the install to finish, and run the command again.</p>
+
+<p>Every command in this guide is typed into Terminal.</p>
+
+<h2 id="part-1">Part 1. Your Mac and Claude Desktop</h2>
+
+<section class="step" id="step-1">
+<h3><span class="n">Step 1.</span> Download the code with Git</h3>
+
+<pre data-copy><code>cd ~
+git clone https://github.com/jordanlawson1988/skylight-mcp-public skylight-mcp
+cd skylight-mcp</code></pre>
+
+<p>Git prints <code>Cloning into 'skylight-mcp'...</code> and a few progress lines. You now have a folder named <code>skylight-mcp</code> in your home folder, and Terminal is inside it.</p>
+
+<p class="note">Leave the folder where it is. Claude Desktop runs the server from this folder, so moving or deleting it later breaks the connection until you repeat Steps 5 and 6.</p>
+
+<label class="done"><input type="checkbox" data-step="1" data-part="1"> Step 1 is done</label>
+</section>
+
+<section class="step" id="step-2">
+<h3><span class="n">Step 2.</span> Install and build</h3>
+
+<pre data-copy><code>npm install
+npm run build</code></pre>
+
+<p><code>npm install</code> downloads the libraries the server needs and ends with a line that starts with <code>added</code> and a package count. <code>npm run build</code> prints the build command and returns to the prompt. If neither shows an error, both worked. Together they take a minute or two.</p>
+
+<label class="done"><input type="checkbox" data-step="2" data-part="1"> Step 2 is done</label>
+</section>
+
+<section class="step" id="step-3">
+<h3><span class="n">Step 3.</span> Make the skylight-mcp command available</h3>
+
+<pre data-copy><code>npm link
+skylight-mcp --version</code></pre>
+
+<p>The second command prints a version number such as <code>0.1.0</code>.</p>
+
+<p>If <code>npm link</code> stops with a permissions error (<code>EACCES</code>), skip it. Everywhere this guide says <code>skylight-mcp</code>, type <code>node dist/cli.js</code> instead while you are inside the <code>skylight-mcp</code> folder. <code>node dist/cli.js --version</code> prints the same number.</p>
+
+<label class="done"><input type="checkbox" data-step="3" data-part="1"> Step 3 is done</label>
+</section>
+
+<section class="step" id="step-4">
+<h3><span class="n">Step 4.</span> Sign in to Skylight</h3>
+
+<pre data-copy><code>skylight-mcp login</code></pre>
+
+<p>It prints a long link and waits for you:</p>
+
+<pre class="out"><code>1. Open this link in your browser and sign in to Skylight:
+
+   https://app.ourskylight.com/oauth/authorize?client_id=...
+
+2. After sign-in, Skylight bounces you straight to its home page, so you
+   usually can't copy the callback address. That's fine: just come back here.
+
+3. Press Enter to finish (reads the sign-in result from Chrome's history),
+   or paste the https://ourskylight.com/welcome?code=... address if you have it:</code></pre>
+
+<ol>
+  <li>Copy the link and open it in Google Chrome. If Chrome is not your default browser, paste the link into Chrome's address bar, because clicking it in Terminal opens the default browser.</li>
+  <li>Sign in with your Skylight email and password. Skylight may ask for them even if its web app is already open in another tab.</li>
+  <li>Skylight sends you on to its home page. That is expected.</li>
+  <li>Go back to Terminal and press Return (the key the prompt calls Enter).</li>
+</ol>
+
+<p>When it works you see:</p>
+
+<pre class="out"><code>Logged in. Access token valid until Tue Nov 17, 4:57 PM EST.
+Run `skylight-mcp doctor` to finish setup.</code></pre>
+
+<p>If it answers <code>No sign-in found in Chrome's history yet</code>, the sign-in did not happen in Chrome or did not finish. Sign in with the link in Chrome, then press Return again. You have 10 minutes from the moment the link was printed. After that, run <code>skylight-mcp login</code> again for a fresh link.</p>
+
+<p>Pressing Return makes skylight-mcp look in Chrome's history for the one address Skylight sent you to after sign-in, and for nothing else. The README's <a href="https://github.com/jordanlawson1988/skylight-mcp-public#login">Login</a> section describes that lookup in detail. The sign-in is stored encrypted on this Mac, with the key in your macOS Keychain.</p>
+
+<label class="done"><input type="checkbox" data-step="4" data-part="1"> Step 4 is done</label>
+</section>
+
+<section class="step" id="step-5">
+<h3><span class="n">Step 5.</span> Run the setup check</h3>
+
+<pre data-copy><code>skylight-mcp doctor</code></pre>
+
+<p><code>doctor</code> checks the sign-in, lists the people on your Skylight and prints the settings Claude Desktop needs. Your ids, names and paths will differ from this example:</p>
+
+<pre class="out"><code>skylight-mcp doctor
+
+API host:   app.ourskylight.com
+Timezone:   America/New_York (set SKYLIGHT_TIMEZONE to change)
+Toolsets:   all (set SKYLIGHT_TOOLSETS to a comma list to trim the tool list)
+Login:      Logged in (token valid until Tue Nov 17, 4:57 PM EST)
+Frames:     1234567 (Home)
+Frame:      1234567
+Profiles:   Ellie (111), Sam (222)
+
+Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):
+
+{
+  "mcpServers": {
+    "skylight": {
+      "command": "/opt/homebrew/bin/node",
+      "args": [
+        "/Users/you/skylight-mcp/dist/server.js"
+      ]
+    }
+  }
+}</code></pre>
+
+<p>Check two lines. <code>Login</code> must say <code>Logged in</code>, and if it does not, go back to Step 4. <code>Profiles</code> should list your family.</p>
+
+<p>Then select everything from the first <code>{</code> to the last <code>}</code> in your own Terminal window and copy it. That block is what you paste in the next step.</p>
+
+<p>Times are shown in Eastern time unless you change the zone. The README explains how under <a href="https://github.com/jordanlawson1988/skylight-mcp-public#time-zones">Time zones</a>.</p>
+
+<label class="done"><input type="checkbox" data-step="5" data-part="1"> Step 5 is done</label>
+</section>
+
+<section class="step" id="step-6">
+<h3><span class="n">Step 6.</span> Add the server to Claude Desktop</h3>
+
+<ol>
+  <li>Open Claude Desktop. In the menu bar choose Claude, then Settings, then Developer, then Edit Config. Finder opens with a file named <code>claude_desktop_config.json</code> selected.</li>
+  <li>Open that file in TextEdit (right-click it, then Open With, then TextEdit).</li>
+  <li>If the file is empty or contains only <code>{}</code>, replace everything with the block you copied in Step 5.</li>
+  <li>If the file already has an <code>mcpServers</code> section, keep it and add only the <code>skylight</code> entry inside it. Put a comma after the entry that comes before it:
+<pre class="out"><code>{
+  "mcpServers": {
+    "another-server": {
+      "command": "/path/it/already/had"
+    },
+    "skylight": {
+      "command": "/opt/homebrew/bin/node",
+      "args": [
+        "/Users/you/skylight-mcp/dist/server.js"
+      ]
+    }
+  }
+}</code></pre>
+  </li>
+  <li>Save the file. Quit Claude Desktop completely with Command-Q, then open it again. Closing the window is not enough.</li>
+</ol>
+
+<p>Use the <code>command</code> and <code>args</code> values that <code>doctor</code> printed for you, not the ones in this example.</p>
+
+<p>To confirm it loaded, go back to Settings, then Developer. <code>skylight</code> should be in the list and marked as running.</p>
+
+<label class="done"><input type="checkbox" data-step="6" data-part="1"> Step 6 is done</label>
+</section>
+
+<section class="step" id="step-7">
+<h3><span class="n">Step 7.</span> Ask Claude about your Skylight</h3>
+
+<p>Start a new chat in Claude Desktop and type:</p>
+
+<pre data-copy><code>Use the Skylight tools to check my login status, then list the profiles on our Skylight.</code></pre>
+
+<p>Claude asks permission the first time it uses each tool. Allow it, and you should get your family's profile names back. Then ask for something real that changes nothing:</p>
+
+<pre data-copy><code>What chores are on our Skylight for the next seven days?</code></pre>
+
+<p>Before you let it change anything, ask for a dry run so you can see what it would do:</p>
+
+<pre data-copy><code>Do a dry run of a weekly chore: Sam takes out the trash every Tuesday. Don't create anything yet.</code></pre>
+
+<p>More ideas are under <a href="https://github.com/jordanlawson1988/skylight-mcp-public#example-prompts">Example prompts</a> in the README. Every delete shows a preview first and needs your confirmation.</p>
+
+<p>Part 1 ends here. If only you use it, on this Mac, you are done.</p>
+
+<label class="done"><input type="checkbox" data-step="7" data-part="1"> Step 7 is done</label>
+</section>
+
+<h2 id="part-2">Part 2. A shared server for the family (optional)</h2>
+
+<p>Part 1 works on one Mac with Claude Desktop. Part 2 puts the same tools on a small server in your own Cloudflare account, so each person in the family can use them from Claude, ChatGPT or Gemini on a phone or any computer. Everyone signs in with their own Google account, and only the email addresses you list get in.</p>
+
+<p>Finish Part 1 first. You also need:</p>
+<ul>
+  <li>A Cloudflare account. The free plan is enough to start.</li>
+  <li>A Google account that can use the Google Cloud console, to create the sign-in client.</li>
+</ul>
+
+<p>Collect the Google email address of each family member who will connect. You need that list in Steps 11 and 12.</p>
+
+<p>The repository describes two copies of the server: <code>staging</code> for trying things out and <code>production</code> for the one you keep. Do every step with <code>staging</code> first. Step 15 repeats them for <code>production</code>.</p>
+
+<p>Run all commands from inside the <code>skylight-mcp</code> folder.</p>
+
+<section class="step" id="step-8">
+<h3><span class="n">Step 8.</span> Sign in to Cloudflare</h3>
+
+<pre data-copy><code>cd ~/skylight-mcp
+npx wrangler login</code></pre>
+
+<p>A browser window opens and asks you to allow Wrangler, Cloudflare's command-line tool. Click Allow. Terminal then confirms that you are logged in.</p>
+
+<label class="done"><input type="checkbox" data-step="8" data-part="2"> Step 8 is done</label>
+</section>
+
+<section class="step" id="step-9">
+<h3><span class="n">Step 9.</span> Deploy the server for the first time</h3>
+
+<pre data-copy><code>npm run remote:deploy:staging</code></pre>
+
+<p>If this is your first Worker, Wrangler may ask you to choose a <code>workers.dev</code> subdomain. Pick a short name, because it becomes part of your server's address. Near the end of the output is that address:</p>
+
+<pre class="out"><code>https://skylight-mcp-staging.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev</code></pre>
+
+<p>Copy it somewhere handy. Wherever this guide shows <code>&lt;your-subdomain&gt;</code>, use your real one.</p>
+
+<div class="fill needs-js">
+  <label for="subdomain">Your workers.dev subdomain</label>
+  <input id="subdomain" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="for example rivera-family" aria-describedby="subdomain-hint">
+  <p class="hint" id="subdomain-hint" aria-live="polite">Type it here, or paste the whole address, and every address on this page fills itself in. It is saved in this browser only.</p>
+</div>
+
+<p>To check that the server is up, open this address in a browser:</p>
+
+<pre data-copy><code>https://skylight-mcp-staging.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev/health</code></pre>
+
+<p>It should show <code>{"ok":true}</code>. The server runs, but nobody can use it yet: it has no secrets and no sign-in.</p>
+
+<label class="done"><input type="checkbox" data-step="9" data-part="2"> Step 9 is done</label>
+</section>
+
+<section class="step" id="step-10">
+<h3><span class="n">Step 10.</span> Create the server's own secrets</h3>
+
+<pre data-copy><code>skylight-mcp remote setup --env staging --url https://skylight-mcp-staging.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev</code></pre>
+
+<p>This saves the address, creates two random secrets, uploads them to the server and keeps one of them in your Keychain. Neither is shown on screen. Look for this line near the end:</p>
+
+<pre class="out"><code>Done: SKYLIGHT_TOKEN_KEY and ADMIN_TOKEN are set on the staging Worker, and the admin token is in your Keychain.</code></pre>
+
+<p>Below it is a checklist of what is still to do. Steps 11 to 14 of this guide are that checklist.</p>
+
+<p class="note">Run setup once per server. Running it again replaces both secrets, and you would have to repeat Step 13.</p>
+
+<label class="done"><input type="checkbox" data-step="10" data-part="2"> Step 10 is done</label>
+</section>
+
+<section class="step" id="step-11">
+<h3><span class="n">Step 11.</span> Create a Google sign-in client</h3>
+
+<p>Family members prove who they are by signing in with Google. For that, Google needs to know about your server.</p>
+
+<ol>
+  <li>Go to console.cloud.google.com and sign in. Create a project with any name, for example <code>family-skylight</code>, or pick one you already have.</li>
+  <li>In the search bar at the top, type <code>Google Auth Platform</code> and open it. If it asks you to get started, enter an app name, pick your email as the support email, choose External as the audience, and finish.</li>
+  <li>Open Audience. Under Test users, click Add users and add the Google email of every family member, yours included. Leave the publishing status on Testing.</li>
+  <li>Open Clients and create a client. The application type is Web application. Under Authorized redirect URIs, add both of these. The second one saves you a trip back here for Step 15.
+<div class="stack">
+<pre data-copy><code>https://skylight-mcp-staging.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev/callback</code></pre>
+<pre data-copy><code>https://skylight-mcp.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev/callback</code></pre>
+</div>
+  </li>
+  <li>Google shows a Client ID, which ends in <code>.apps.googleusercontent.com</code>, and a Client secret, which starts with <code>GOCSPX-</code>. Keep that window open or copy both. You need them in the next step.</li>
+</ol>
+
+<p>Test users are not added under IAM. IAM gives people access to the Google Cloud project itself, which family members do not need.</p>
+
+<p>Google renames these screens from time to time. If yours look different, the two things to find are the OAuth consent screen, for the test users, and an OAuth client ID of type Web application.</p>
+
+<label class="done"><input type="checkbox" data-step="11" data-part="2"> Step 11 is done</label>
+</section>
+
+<section class="step" id="step-12">
+<h3><span class="n">Step 12.</span> Give the server the Google client and the family list</h3>
+
+<p>Run these one at a time. Each asks for a value and hides what you type or paste.</p>
+
+<div class="stack">
+<pre data-copy><code>npx wrangler secret put GOOGLE_CLIENT_ID --env staging</code></pre>
+<pre data-copy><code>npx wrangler secret put GOOGLE_CLIENT_SECRET --env staging</code></pre>
+<pre data-copy><code>npx wrangler secret put ALLOWED_EMAILS --env staging</code></pre>
+</div>
+
+<p>The first two are the Client ID and the Client secret from Step 11. <code>ALLOWED_EMAILS</code> is the family list: Google email addresses separated by commas, such as <code>you@gmail.com,spouse@gmail.com</code>.</p>
+
+<p class="note">Because the input is hidden, pasting the secret where the ID belongs is easy to do and hard to notice. Copy each value right before the command that needs it.</p>
+
+<p><code>ALLOWED_EMAILS</code> is replaced as a whole every time you set it. To add someone later, enter the complete list again, not just the new address.</p>
+
+<p>Then deploy once more, as the checklist from Step 10 asks:</p>
+
+<pre data-copy><code>npm run remote:deploy:staging</code></pre>
+
+<label class="done"><input type="checkbox" data-step="12" data-part="2"> Step 12 is done</label>
+</section>
+
+<section class="step" id="step-13">
+<h3><span class="n">Step 13.</span> Sign the server in to Skylight</h3>
+
+<p>The server keeps its own Skylight sign-in, separate from the one on your Mac.</p>
+
+<pre data-copy><code>skylight-mcp remote login --env staging</code></pre>
+
+<p>It works like Step 4: open the printed link in Chrome, sign in to Skylight, come back and press Return. The last line is:</p>
+
+<pre class="out"><code>Shared server signed in to Skylight. Token valid until Tue Nov 17, 4:57 PM EST.</code></pre>
+
+<p>Now check the server:</p>
+
+<pre data-copy><code>skylight-mcp remote status --env staging</code></pre>
+
+<pre class="out"><code>{
+  "env": "staging",
+  "url": "https://skylight-mcp-staging.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev",
+  "mcpUrl": "https://skylight-mcp-staging.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev/mcp",
+  "loggedIn": true,
+  "needsLogin": false,
+  "tokenExpiresAt": "2026-11-17T21:57:05.531Z",
+  "credentialError": null,
+  "tokenExpiresWhen": "Tue Nov 17, 4:57 PM EST"
+}</code></pre>
+
+<p><code>loggedIn</code> should be <code>true</code>. The <code>mcpUrl</code> line is the address you give to the assistants in the next step.</p>
+
+<label class="done"><input type="checkbox" data-step="13" data-part="2"> Step 13 is done</label>
+</section>
+
+<section class="step" id="step-14">
+<h3><span class="n">Step 14.</span> Connect Claude, ChatGPT or Gemini</h3>
+
+<p>Each person does this once, in their own account. The address to enter is your server's address with <code>/mcp</code> on the end:</p>
+
+<pre data-copy><code>https://skylight-mcp-staging.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev/mcp</code></pre>
+
+<p>In Claude, open Customize, then Connectors, then Add custom connector. Paste the address, leave the OAuth client fields empty, and click Connect. Claude on the web, Claude Desktop and the iPhone app share connectors, so adding it once is enough. Claude's free plan allows one custom connector.</p>
+
+<p>ChatGPT needs Developer mode first. In a ChatGPT Business workspace, the owner turns it on for apps in the workspace settings. Then go to Settings, then Apps, add a custom MCP server with the same address, and choose OAuth as the authentication. A workspace that belongs to an employer may not allow a personal connector.</p>
+
+<p>For Gemini, use gemini.google.com (the website, not the phone app). Go to Settings, then Connected Apps, then Custom apps, and add the same address. Leave Advanced features empty. Gemini needs a personal Google account in the US, 18 or older, with English as the language and Keep Activity turned on. Once added on the web, it also works in the Gemini phone apps.</p>
+
+<p>All three then show the same two pages. The first comes from your server and asks <code>Allow Claude to use the family Skylight?</code> (or ChatGPT, or Gemini). Click Allow and continue with Google. Then Google asks which account to use, and the person picks the one that is on the family list. Google may add a notice that the app is still being tested. That app is your own sign-in client from Step 11, so continue.</p>
+
+<p>Test it with a question that only reads:</p>
+
+<pre data-copy><code>What chores are on our Skylight today?</code></pre>
+
+<p>A connection lasts up to 30 days. After that the assistant asks the person to connect again. These menus belong to Anthropic, OpenAI and Google and they move, so if a name here does not match what you see, look for custom connectors or custom MCP servers in the settings.</p>
+
+<label class="done"><input type="checkbox" data-step="14" data-part="2"> Step 14 is done</label>
+</section>
+
+<section class="step" id="step-15">
+<h3><span class="n">Step 15.</span> Move to production</h3>
+
+<p>Staging is a complete server and you can keep using it. Production is the same server under a shorter address, meant to be the one you leave alone while you try changes on staging. The README recommends running production on Cloudflare's Workers Paid plan ($5 a month), because the free plan has a daily write limit that sign-ins can use up. Its notes on limits are under <a href="https://github.com/jordanlawson1988/skylight-mcp-public#use-from-claude-chatgpt-and-gemini-on-any-device">Use from Claude, ChatGPT and Gemini on any device</a>.</p>
+
+<p>Repeat Steps 9, 10, 12 and 13 with <code>production</code>. Run these one at a time, as before, because several of them stop and ask you for something.</p>
+
+<div class="stack">
+<pre data-copy><code>npm run remote:deploy:production</code></pre>
+<pre data-copy><code>skylight-mcp remote setup --env production --url https://skylight-mcp.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev</code></pre>
+<pre data-copy><code>npx wrangler secret put GOOGLE_CLIENT_ID --env production</code></pre>
+<pre data-copy><code>npx wrangler secret put GOOGLE_CLIENT_SECRET --env production</code></pre>
+<pre data-copy><code>npx wrangler secret put ALLOWED_EMAILS --env production</code></pre>
+<pre data-copy><code>npm run remote:deploy:production</code></pre>
+<pre data-copy><code>skylight-mcp remote login --env production</code></pre>
+</div>
+
+<p>Then connect each assistant again as in Step 14, this time with:</p>
+
+<pre data-copy><code>https://skylight-mcp.<span class="sub">&lt;your-subdomain&gt;</span>.workers.dev/mcp</code></pre>
+
+<p>The Google client from Step 11 already has the production redirect address, so nothing changes in Google.</p>
+
+<label class="done"><input type="checkbox" data-step="15" data-part="2"> Step 15 is done</label>
+</section>
+
+<h2 id="family">Add or remove a family member</h2>
+
+<p>To add someone, do these in order:</p>
+<ol>
+  <li>Add their Google email as a test user in the Google Cloud console (Step 11, item 3).</li>
+  <li>Set the family list again with every address on it, the new one included: <code>npx wrangler secret put ALLOWED_EMAILS --env staging</code>.</li>
+  <li>Have them connect their assistant (Step 14).</li>
+</ol>
+
+<p>To remove someone, disconnect their apps and then set the list again without their address. Run the first command, wait for it to finish, then run the second.</p>
+
+<div class="stack">
+<pre data-copy><code>skylight-mcp remote revoke someone@gmail.com --env staging</code></pre>
+<pre data-copy><code>npx wrangler secret put ALLOWED_EMAILS --env staging</code></pre>
+</div>
+
+<p>The list is checked on every request, so the change takes effect immediately.</p>
+
+<h2 id="update">Update to a newer version</h2>
+
+<pre data-copy><code>cd ~/skylight-mcp
+git pull
+npm install
+npm run build</code></pre>
+
+<p>Quit and reopen Claude Desktop so it starts the new build. If you run the shared server, deploy it again with <code>npm run remote:deploy:staging</code>, and with <code>npm run remote:deploy:production</code> if you use production. Your sign-ins and secrets stay as they are.</p>
+
+<h2 id="troubleshooting">When something goes wrong</h2>
+
+<p>On your Mac:</p>
+
+<table>
+  <thead><tr><th>What you see</th><th>What to do</th></tr></thead>
+  <tbody>
+    <tr><td><code>command not found: skylight-mcp</code></td><td><code>npm link</code> did not take. From inside the <code>skylight-mcp</code> folder, type <code>node dist/cli.js</code> in place of <code>skylight-mcp</code>.</td></tr>
+    <tr><td><code>No sign-in found in Chrome's history yet</code></td><td>Open the link in Google Chrome, not Safari. Finish signing in, then press Return again.</td></tr>
+    <tr><td><code>The login attempt expired</code></td><td>More than 10 minutes passed. Run <code>skylight-mcp login</code> again.</td></tr>
+    <tr><td><code>doctor</code> says <code>not logged in</code> or <code>session expired or revoked</code></td><td>Run <code>skylight-mcp login</code> again.</td></tr>
+    <tr><td><code>doctor</code> says <code>This account has several frames</code></td><td>It lists their ids. Add <code>"env": { "SKYLIGHT_FRAME_ID": "&lt;id&gt;" }</code> to the <code>skylight</code> entry in the Claude Desktop config.</td></tr>
+    <tr><td>Claude Desktop does not list <code>skylight</code>, or shows an error next to it</td><td>The config file is the usual cause. Check it with the first command below, then quit and reopen Claude Desktop.</td></tr>
+    <tr><td>Claude has the tools but they fail</td><td>Run <code>skylight-mcp doctor</code> and fix what it reports. Then read the server's log with the second command below.</td></tr>
+    <tr><td>Claude struggles with the number of tools</td><td>Trim the list with <code>SKYLIGHT_TOOLSETS</code>. See <a href="https://github.com/jordanlawson1988/skylight-mcp-public#toolsets">Toolsets</a> in the README.</td></tr>
+  </tbody>
+</table>
+
+<div class="stack">
+<pre data-copy><code>node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log("The config file is valid JSON.")' "$HOME/Library/Application Support/Claude/claude_desktop_config.json"</code></pre>
+<pre data-copy><code>tail -n 20 "$HOME/Library/Logs/Claude/mcp-server-skylight.log"</code></pre>
+</div>
+
+<p>The first command prints <code>The config file is valid JSON.</code> or the position of the mistake, which is most often a missing or extra comma.</p>
+
+<p>On the shared server:</p>
+
+<table>
+  <thead><tr><th>What you see</th><th>What to do</th></tr></thead>
+  <tbody>
+    <tr><td><code>This Google account is not on the family list.</code></td><td>The address is missing from <code>ALLOWED_EMAILS</code> or misspelled. Set the whole list again (Step 12).</td></tr>
+    <tr><td>Google says <code>Access blocked</code> or <code>Error 403: access_denied</code></td><td>The person is not a test user of your Google sign-in client. Add them (Step 11, item 3).</td></tr>
+    <tr><td>Google says <code>Error 400: redirect_uri_mismatch</code></td><td>The redirect address in the Google client must be exactly your server's address followed by <code>/callback</code> (Step 11, item 4).</td></tr>
+    <tr><td>A page titled <code>Not set up yet</code></td><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code> or <code>ALLOWED_EMAILS</code> is missing, or a value went into the wrong prompt. Repeat Step 12.</td></tr>
+    <tr><td><code>This app cannot connect to the family Skylight.</code></td><td>Only Claude, ChatGPT and Gemini are allowed to connect.</td></tr>
+    <tr><td>Tools answer that the server owner needs to run <code>skylight-mcp remote login</code></td><td>The server's Skylight sign-in is missing or expired. Repeat Step 13.</td></tr>
+    <tr><td><code>The staging server answered 401</code></td><td>The admin token no longer matches. Run <code>skylight-mcp remote setup</code> for that server again, then repeat Step 13.</td></tr>
+    <tr><td><code>The staging server answered 404</code></td><td>The address is wrong or the Worker is not deployed. Check the address from Step 9.</td></tr>
+  </tbody>
+</table>
+
+<p>To watch requests arrive while someone tries to connect, run this and leave it open. Control-C stops it.</p>
+
+<pre data-copy><code>npx wrangler tail --env staging</code></pre>
+
+<h2 id="remove">Remove it</h2>
+
+<p>If you set up the shared server, remove it first, because these commands need the folder and the <code>skylight-mcp</code> command. The first takes away the server's Skylight sign-in and the second deletes the Worker. Both ask before they do anything, so run them one at a time.</p>
+
+<div class="stack">
+<pre data-copy><code>skylight-mcp remote logout --env staging</code></pre>
+<pre data-copy><code>npx wrangler delete --env staging</code></pre>
+</div>
+
+<p>Do the same with <code>production</code> if you deployed it, then delete the client you created in the Google Cloud console.</p>
+
+<p>On your Mac, sign out and remove the command:</p>
+
+<div class="stack">
+<pre data-copy><code>skylight-mcp logout</code></pre>
+<pre data-copy><code>npm uninstall -g @jordanlawson/skylight-mcp</code></pre>
+</div>
+
+<p>Last, delete the <code>skylight</code> entry from the Claude Desktop config, restart Claude Desktop, and move the <code>skylight-mcp</code> folder to the Trash.</p>
+
+<footer>
+  <p>skylight-mcp is an unofficial project and is not affiliated with Skylight. The code and this guide are MIT licensed. Source: <a href="https://github.com/jordanlawson1988/skylight-mcp-public">github.com/jordanlawson1988/skylight-mcp-public</a>.</p>
+</footer>
+</main>
+
+</div>
+<p class="sr" id="announce" aria-live="polite"></p>
+
+<script>
+(function () {
+  "use strict";
+  document.documentElement.classList.add("js");
+
+  var KEY = "skylight-mcp-setup-guide";
+  var PLACEHOLDER = "<your-subdomain>";
+  var state = { done: {}, sub: "" };
+
+  // Saved in this browser only. Storage can be unavailable (private windows, strict settings): the page works without it.
+  try {
+    var saved = JSON.parse(window.localStorage.getItem(KEY) || "null");
+    if (saved && typeof saved === "object") {
+      if (saved.done && typeof saved.done === "object") state.done = saved.done;
+      if (typeof saved.sub === "string") state.sub = cleanSub(saved.sub);
+    }
+  } catch (e) { /* start fresh */ }
+
+  function save() {
+    try { window.localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* not saved, still usable */ }
+  }
+
+  function announce(text) {
+    var el = document.getElementById("announce");
+    if (el) el.textContent = text;
+  }
+
+  // ---- copy buttons ----
+
+  function selectText(node) {
+    var range = document.createRange();
+    range.selectNodeContents(node);
+    var selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(area);
+      if (ok) resolve(); else reject(new Error("copy refused"));
+    });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll("pre[data-copy]"), function (pre) {
+    var code = pre.querySelector("code") || pre;
+    var wrap = document.createElement("div");
+    wrap.className = "code";
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy";
+    button.textContent = "Copy";
+    var timer = null;
+    button.addEventListener("click", function () {
+      var text = code.textContent.replace(/\s+$/, "");
+      function show(label, spoken) {
+        button.textContent = label;
+        announce(spoken);
+        window.clearTimeout(timer);
+        timer = window.setTimeout(function () { button.textContent = "Copy"; }, 1600);
+      }
+      copyText(text).then(
+        function () { show("Copied", "Copied to the clipboard."); },
+        function () { selectText(code); show("Press ⌘C", "Selected. Press Command-C to copy."); }
+      );
+    });
+    wrap.appendChild(button);
+  });
+
+  // ---- your workers.dev subdomain, filled into every address ----
+
+  function cleanSub(value) {
+    var v = String(value).trim().toLowerCase();
+    var fromAddress = /([a-z0-9-]+)\.workers\.dev/.exec(v);
+    if (fromAddress) v = fromAddress[1];
+    return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(v) ? v : "";
+  }
+
+  var subs = document.querySelectorAll(".sub");
+  var input = document.getElementById("subdomain");
+  var hint = document.getElementById("subdomain-hint");
+  var HINT_EMPTY = hint ? hint.textContent : "";
+
+  function applySub() {
+    Array.prototype.forEach.call(subs, function (el) {
+      el.textContent = state.sub || PLACEHOLDER;
+      el.classList.toggle("filled", state.sub !== "");
+    });
+  }
+
+  if (input) {
+    input.value = state.sub;
+    input.addEventListener("input", function () {
+      var typed = input.value.trim();
+      state.sub = cleanSub(typed);
+      applySub();
+      save();
+      if (!hint) return;
+      if (state.sub) hint.textContent = "Every address on this page now uses " + state.sub + ".workers.dev.";
+      else if (typed) hint.textContent = "That does not look like a workers.dev subdomain. Use letters, numbers and hyphens, or paste the whole address.";
+      else hint.textContent = HINT_EMPTY;
+    });
+    if (state.sub && hint) hint.textContent = "Every address on this page now uses " + state.sub + ".workers.dev.";
+  }
+  applySub();
+
+  // ---- the checklist ----
+
+  var boxes = document.querySelectorAll("input[data-step]");
+
+  function applyDone() {
+    var counts = {};
+    Array.prototype.forEach.call(boxes, function (box) {
+      var step = box.getAttribute("data-step");
+      var part = box.getAttribute("data-part");
+      var on = state.done[step] === true;
+      box.checked = on;
+      counts[part] = counts[part] || { done: 0, total: 0 };
+      counts[part].total += 1;
+      if (on) counts[part].done += 1;
+      var link = document.querySelector('nav a[href="#step-' + step + '"]');
+      if (link) link.classList.toggle("is-done", on);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-progress]"), function (el) {
+      var c = counts[el.getAttribute("data-progress")];
+      el.textContent = c ? c.done + " of " + c.total + " steps done" : "";
+    });
+  }
+
+  Array.prototype.forEach.call(boxes, function (box) {
+    box.addEventListener("change", function () {
+      var step = box.getAttribute("data-step");
+      if (box.checked) state.done[step] = true; else delete state.done[step];
+      applyDone();
+      save();
+    });
+  });
+
+  var reset = document.getElementById("reset");
+  if (reset) reset.addEventListener("click", function () {
+    state.done = {};
+    applyDone();
+    save();
+    announce("Checklist cleared.");
+  });
+
+  applyDone();
+
+  // ---- contents: always open beside the page on wide screens, folded away above it on small ones ----
+
+  var toc = document.getElementById("toc");
+  if (toc && window.matchMedia) {
+    var wide = window.matchMedia("(min-width: 62rem)");
+    var fit = function () { toc.open = wide.matches; };
+    fit();
+    if (wide.addEventListener) wide.addEventListener("change", fit); else if (wide.addListener) wide.addListener(fit);
+    Array.prototype.forEach.call(toc.querySelectorAll("a"), function (a) {
+      a.addEventListener("click", function () { if (!wide.matches) toc.open = false; });
+    });
+  }
+})();
+</script>
+</body>
+</html>
