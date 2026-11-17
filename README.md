@@ -2,7 +2,9 @@
 
 ## What it is
 
-skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists, calendar events, the meal plan and recipes, photos and albums, devices, frame settings and sharing on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API. The same tools can also run as a shared server on Cloudflare Workers for Claude and ChatGPT on any device (see "Use from Claude and ChatGPT on any device").
+skylight-mcp is a local MCP server that lets an AI assistant such as Claude Desktop manage chores, routines, rewards, lists, calendar events, the meal plan and recipes, photos and albums, devices, frame settings and sharing on a Skylight Calendar. It runs on your Mac over stdio and talks to Skylight's web API. The same tools can also run as a shared server on Cloudflare Workers for Claude, ChatGPT and Gemini on any device (see "Use from Claude, ChatGPT and Gemini on any device").
+
+To set it up, follow the [step-by-step setup guide](docs/setup-guide.md). It goes from `git clone` to a working assistant and shows what each command prints along the way.
 
 It runs on macOS only, because the login credential is stored with the macOS Keychain and the sign-in step reads Google Chrome's history.
 
@@ -35,6 +37,22 @@ This is an unofficial project. It is not affiliated with, endorsed by or support
 - Tokens, codes and keys are never written to logs and never returned in tool results. `status` and `doctor` print no token values.
 - The OAuth token Skylight issues has full-account scope. The tool layer here is narrow, but the token itself is not. Treat the stored credential as sensitive, and run `skylight-mcp logout` to remove it.
 
+## Setup guide
+
+If this is your first time, use the step-by-step guide instead of the shorter sections below. It lists what you need, gives every command in order, shows the output to expect, and has a table of error messages with what to do about each.
+
+- [docs/setup-guide.md](docs/setup-guide.md) reads right here on GitHub.
+- [docs/setup-guide.html](docs/setup-guide.html) is the same guide as a web page, with copy buttons, a checklist that remembers where you stopped, and a field that fills your server's address into every command. GitHub shows HTML files as source code, so open it from your clone instead: `open docs/setup-guide.html`.
+
+The short version, for one Mac and Claude Desktop:
+
+1. Clone the repository, install and build it: [Install](#install).
+2. Sign in to Skylight with `skylight-mcp login`: [Login](#login).
+3. Run `skylight-mcp doctor` and paste the config it prints into Claude Desktop: [Claude Desktop setup](#claude-desktop-setup).
+4. Quit and reopen Claude Desktop, then ask it what chores are on your Skylight.
+
+The shared server for the rest of the family is Part 2 of the guide and is described under [Use from Claude, ChatGPT and Gemini on any device](#use-from-claude-chatgpt-and-gemini-on-any-device).
+
 ## Install
 
 The package is named `@jordanlawson/skylight-mcp` but it is not published to npm. Install from source. Node 20 or newer is required.
@@ -48,6 +66,8 @@ npm link
 ```
 
 `npm link` makes the `skylight-mcp` command available on your PATH. Commands: `login`, `logout`, `status`, `doctor`. Without linking, `node dist/cli.js <command>` does the same thing.
+
+Step by step, with the output to expect: Steps 1 to 3 of the setup guide ([Markdown](docs/setup-guide.md#step-1-download-the-code-with-git), or `docs/setup-guide.html#step-1` in the [web page](docs/setup-guide.html)).
 
 ## Login
 
@@ -64,6 +84,8 @@ What that lookup does: it reads only history entries whose URL starts with `http
 If you would rather paste the address (or you use another browser), paste the full `https://ourskylight.com/welcome?code=...` address at the prompt instead of pressing Enter. If a login was started earlier and you have the final URL, run `skylight-mcp login --complete <url>` to finish it. `--pkce S256|plain` selects the PKCE method (default `S256`).
 
 Check the result with `skylight-mcp status`. It shows whether you are logged in, the API host, the token expiry and the frame in use.
+
+Step by step: Step 4 of the setup guide ([Markdown](docs/setup-guide.md#step-4-sign-in-to-skylight), or `docs/setup-guide.html#step-4` in the [web page](docs/setup-guide.html)).
 
 ## Claude Desktop setup
 
@@ -86,16 +108,20 @@ skylight-mcp doctor
 
 If your account has more than one frame, set `SKYLIGHT_FRAME_ID` in the `env` block of that entry. `doctor` includes it when it is set in your environment, and does the same for `SKYLIGHT_TIMEZONE` and `SKYLIGHT_TOOLSETS`.
 
+Step by step, including how to merge the block into a config file that already has other servers: Steps 5 to 7 of the setup guide ([Markdown](docs/setup-guide.md#step-5-run-the-setup-check), or `docs/setup-guide.html#step-5` in the [web page](docs/setup-guide.html)). If Claude Desktop does not show the server afterwards, see [When something goes wrong](docs/setup-guide.md#when-something-goes-wrong).
+
 ## Use from Claude, ChatGPT and Gemini on any device
 
 The same tools can also run as a shared server, so the family can use them from Claude (web, Desktop, iPhone), ChatGPT Business and Gemini (web and phone), each signed in as themselves, on the family's one Skylight frame. It is a Cloudflare Worker (free tier): Claude, ChatGPT and Gemini connect to it over OAuth, family members sign in with Google, and only the emails on the family list get in. The server holds its own Skylight sign-in (Skylight rotates refresh tokens, so it never shares the Mac's), encrypted in a Durable Object, and logs every change with the family member who made it. The Mac setup above keeps working unchanged.
 
 Run these from your clone of this repository (the commands use its `wrangler.jsonc`). Do staging first, try it, then repeat with `--env production` and `npm run remote:deploy:production`.
 
+The same steps with more explanation, the output to expect and the usual error messages are Part 2 of the setup guide: Steps 8 to 15 ([Markdown](docs/setup-guide.md#part-2-a-shared-server-for-the-family-optional), or `docs/setup-guide.html#step-8` in the [web page](docs/setup-guide.html)). In the web page you type your `workers.dev` subdomain once and it fills that into every command.
+
 1. Sign in to Cloudflare: `npx wrangler login`.
 2. Deploy once to get the address: `npm run remote:deploy:staging`. It prints `https://skylight-mcp-staging.<your-subdomain>.workers.dev` (production: `https://skylight-mcp.<your-subdomain>.workers.dev`). The KV namespace is created on this first deploy.
 3. Create the server's two internal secrets: `skylight-mcp remote setup --env staging --url https://skylight-mcp-staging.<your-subdomain>.workers.dev`. It saves the address in `~/Library/Application Support/skylight-mcp/remote.json`, generates `SKYLIGHT_TOKEN_KEY` (encrypts the stored Skylight sign-in) and `ADMIN_TOKEN` (for the commands below), uploads both with `wrangler secret put` and keeps the admin token in your Keychain. Neither is printed or written to a file. Running setup again replaces both, after which you run `remote login` again.
-4. Create a Google sign-in client: Google Cloud console > APIs & Services > Credentials > Create credentials > OAuth client ID > Web application. Authorized redirect URIs: `https://skylight-mcp-staging.<your-subdomain>.workers.dev/callback` and `https://skylight-mcp.<your-subdomain>.workers.dev/callback`. If the OAuth consent screen is in Testing, add both family emails as test users.
+4. Create a Google sign-in client: Google Cloud console > APIs & Services > Credentials > Create credentials > OAuth client ID > Web application. Authorized redirect URIs: `https://skylight-mcp-staging.<your-subdomain>.workers.dev/callback` and `https://skylight-mcp.<your-subdomain>.workers.dev/callback`. If the OAuth consent screen is in Testing, add both family emails as test users (Google Auth Platform > Audience > Test users, not IAM).
 5. Give the Worker the Google client and the family list (each command asks for the value; the CLI never sees the Google secret):
 
    ```sh
@@ -103,6 +129,8 @@ Run these from your clone of this repository (the commands use its `wrangler.jso
    npx wrangler secret put GOOGLE_CLIENT_SECRET --env staging
    npx wrangler secret put ALLOWED_EMAILS --env staging   # comma-separated, e.g. you@gmail.com,spouse@example.com
    ```
+
+   `ALLOWED_EMAILS` is replaced as a whole each time you set it, so always enter the complete list. Then deploy again, as the checklist printed by `remote setup` asks: `npm run remote:deploy:staging`.
 
 6. Sign the server in to Skylight: `skylight-mcp remote login --env staging`. It is the same Chrome sign-in as `skylight-mcp login`, but the result goes to the server, not to this Mac's store. `skylight-mcp remote status --env staging` shows the server's sign-in.
 7. Claude (web, Desktop and iPhone share connectors): Customize > Connectors > Add custom connector, URL `https://skylight-mcp-staging.<your-subdomain>.workers.dev/mcp`. Leave the OAuth client fields empty; Claude registers itself. Connect, approve the consent page, then choose your Google account. Claude Free allows one custom connector.
