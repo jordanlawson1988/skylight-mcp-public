@@ -206,7 +206,14 @@ export async function phase2Smoke(rt: Runtime, frameId: string, today: string): 
     const occurrences = series.filter((e) => /^\d+-\d+$/.test(e.id));
     if (series.length < 3 || occurrences.length === 0 || occurrences.some((e) => e.masterId !== series[0]!.masterId)) throw new Error(`weekly series not listed with composite ids: ${series.map((e) => e.id).join(", ")}`);
     step(`weekly event lists ${series.length} occurrences with composite ids (${occurrences[0]!.id})`);
-    const target = occurrences[0]!.id;
+    // A new time for the series goes through an occurrence; the bare master id once moved a live series to 1648 (docs/api.md). Given on the
+    // second occurrence's day, the first must move too.
+    const moveDay = (occurrences[1] ?? occurrences[0]!).startsAt.slice(0, 10);
+    ok(await call("skylight_update_event", { eventId: series[0]!.masterId, startsAt: `${moveDay}T07:15`, endsAt: `${moveDay}T08:45` }), "move series time");
+    const retimed = (await eventsBetween(day1, addDays(day1, 22))).filter((e) => e.title === `${PREFIX} weekly ${stamp}`);
+    if (retimed.length !== series.length || retimed.some((e) => e.startsAt.slice(11, 16) !== "07:15" || e.masterId !== series[0]!.masterId)) throw new Error(`series time not moved to 07:15 on every occurrence: ${retimed.map((e) => e.startsAt).join(", ")}`);
+    step(`series moved to 7:15 AM on all ${retimed.length} occurrences (${retimed[0]!.startsAt})`);
+    const target = retimed[0]!.id;
     const onePreview = ok(await call("skylight_delete_event", { eventId: target, applyTo: "one" }), "delete one preview") as { confirmed: boolean };
     if (onePreview.confirmed !== false) throw new Error("delete preview confirmed something");
     ok(await call("skylight_delete_event", { eventId: target, applyTo: "one", confirm: true }), "delete one occurrence");
